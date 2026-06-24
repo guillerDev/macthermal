@@ -69,46 +69,64 @@ struct SMCValue {
         var b = bytes
         return withUnsafeBytes(of: &b) { raw -> Double? in
             let p = raw.bindMemory(to: UInt8.self)
+            // Each case checks `size` against the bytes it reads. The backing
+            // buffer is always a 32-byte (zero-padded) tuple, so this is not
+            // about memory safety — it's about not fabricating a value from
+            // bytes a short/misreported key never actually provided.
             switch type {
             case "flt ":
                 guard size >= 4 else { return nil }
                 let bits = UInt32(p[0]) | UInt32(p[1]) << 8 | UInt32(p[2]) << 16 | UInt32(p[3]) << 24
                 return Double(Float(bitPattern: bits))
             case "ui8 ", "ui8":
+                guard size >= 1 else { return nil }
                 return Double(p[0])
             case "ui16":
+                guard size >= 2 else { return nil }
                 return Double(UInt16(p[0]) << 8 | UInt16(p[1]))
             case "ui32":
+                guard size >= 4 else { return nil }
                 return Double(UInt32(p[0]) << 24 | UInt32(p[1]) << 16 | UInt32(p[2]) << 8 | UInt32(p[3]))
             case "si8 ", "si8":
+                guard size >= 1 else { return nil }
                 return Double(Int8(bitPattern: p[0]))
             case "si16":
+                guard size >= 2 else { return nil }
                 return Double(Int16(bitPattern: UInt16(p[0]) << 8 | UInt16(p[1])))
             case "sp78":
+                guard size >= 2 else { return nil }
                 let v = Int16(bitPattern: UInt16(p[0]) << 8 | UInt16(p[1]))
                 return Double(v) / 256.0
             case "fpe2":
+                guard size >= 2 else { return nil }
                 let v = UInt16(p[0]) << 8 | UInt16(p[1])
                 return Double(v) / 4.0
             case "fp2e":
+                guard size >= 2 else { return nil }
                 let v = UInt16(p[0]) << 8 | UInt16(p[1])
                 return Double(v) / 16384.0
             case "fp1f":
+                guard size >= 2 else { return nil }
                 let v = UInt16(p[0]) << 8 | UInt16(p[1])
                 return Double(v) / 32768.0
             case "fp4c":
+                guard size >= 2 else { return nil }
                 let v = UInt16(p[0]) << 8 | UInt16(p[1])
                 return Double(v) / 4096.0
             case "fp5b":
+                guard size >= 2 else { return nil }
                 let v = UInt16(p[0]) << 8 | UInt16(p[1])
                 return Double(v) / 2048.0
             case "fp6a":
+                guard size >= 2 else { return nil }
                 let v = UInt16(p[0]) << 8 | UInt16(p[1])
                 return Double(v) / 1024.0
             case "fp79":
+                guard size >= 2 else { return nil }
                 let v = UInt16(p[0]) << 8 | UInt16(p[1])
                 return Double(v) / 512.0
             case "fp88":
+                guard size >= 2 else { return nil }
                 let v = UInt16(p[0]) << 8 | UInt16(p[1])
                 return Double(v) / 256.0
             default:
@@ -146,6 +164,11 @@ final class SMC {
     private var keyListCache: [String]?
     private var keyInfoCache: [String: (type: String, size: UInt32)] = [:]
     private var tempKeyCache: [String]?
+    // Fan count and per-fan min/max RPM are hardware limits — fixed at runtime,
+    // so they are read once and cached too. Only the live RPM (`Ac`) and target
+    // (`Tg`) are re-read each capture.
+    private var fanCountCache: Int?
+    private var fanLimitsCache: [Int: (min: Double, max: Double)] = [:]
 
     init() throws {
         let service = IOServiceGetMatchingService(
@@ -172,10 +195,12 @@ final class SMC {
         return output
     }
 
-    /// Number of keys the SMC exposes (read via the "#KEY" meta key).
+    /// Number of keys the SMC exposes (read via the "#KEY" meta key). Clamped
+    /// to a sane range so a corrupt/garbage count can't blow up the enumeration
+    /// (huge `reserveCapacity`, millions of IOKit calls, or an `Int(_:)` trap).
     func keyCount() throws -> UInt32 {
-        let v = try read("#KEY")
-        return UInt32(v.double ?? 0)
+        let raw = try read("#KEY").double ?? 0
+        return UInt32(clampedCount(raw, upperBound: 8192))
     }
 
     /// Returns the FourCharCode key name at a given enumeration index.
@@ -240,6 +265,25 @@ final class SMC {
         }
         tempKeyCache = keys
         return keys
+    }
+
+    /// Number of fans (`FNum`), clamped and cached. Bounds a corrupt count the
+    /// same way `keyCount()` does.
+    func fanCount() -> Int {
+        if let fanCountCache { return fanCountCache }
+        let raw = (try? read("FNum"))?.double ?? 0
+        let n = clampedCount(raw, upperBound: 64)
+        fanCountCache = n
+        return n
+    }
+
+    /// Static min/max RPM limits for fan `i` (hardware-fixed; cached).
+    func fanLimits(_ i: Int) -> (min: Double, max: Double) {
+        if let cached = fanLimitsCache[i] { return cached }
+        let limits = (min: (try? read("F\(i)Mn"))?.double ?? 0,
+                      max: (try? read("F\(i)Mx"))?.double ?? 0)
+        fanLimitsCache[i] = limits
+        return limits
     }
 }
 

@@ -104,6 +104,16 @@ struct ThermalState {
     }
 }
 
+// MARK: - Helpers
+
+/// Clamps a raw count read from the SMC to a sane, non-negative integer range.
+/// Guards against NaN / ∞ / negative / absurdly-large values that would
+/// otherwise crash an `Int(_:)` conversion or blow up an allocation.
+func clampedCount(_ raw: Double, upperBound: Int) -> Int {
+    guard raw.isFinite, raw >= 0 else { return 0 }
+    return min(Int(raw), upperBound)
+}
+
 // MARK: - Collection
 
 func collectTemps(_ smc: SMC) -> [TempReading] {
@@ -120,14 +130,14 @@ func collectTemps(_ smc: SMC) -> [TempReading] {
 }
 
 func collectFans(_ smc: SMC) -> [FanReading] {
-    guard let countVal = try? smc.read("FNum"), let count = countVal.double else { return [] }
     var fans: [FanReading] = []
-    for i in 0..<Int(count) {
+    // Fan count and min/max RPM are cached (hardware-fixed); only the live RPM
+    // and target are re-read each capture.
+    for i in 0..<smc.fanCount() {
         let rpm = (try? smc.read("F\(i)Ac"))?.double ?? 0
-        let mn = (try? smc.read("F\(i)Mn"))?.double ?? 0
-        let mx = (try? smc.read("F\(i)Mx"))?.double ?? 0
         let tg = (try? smc.read("F\(i)Tg"))?.double ?? 0
-        fans.append(FanReading(index: i, rpm: rpm, min: mn, max: mx, target: tg))
+        let limits = smc.fanLimits(i)
+        fans.append(FanReading(index: i, rpm: rpm, min: limits.min, max: limits.max, target: tg))
     }
     return fans
 }
