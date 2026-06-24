@@ -1,13 +1,16 @@
-BIN      := macthermal
-GUI_BIN  := macthermal-gui
-APP      := macthermal.app
-PREFIX   ?= /usr/local
+BIN       := macthermal
+GUI_BIN   := macthermal-gui
+APP       := macthermal.app
+TEST_BIN  := .macthermal-tests
+PREFIX    ?= /usr/local
 
 SHARED   := Sources/SMC.swift Sources/Sensors.swift
-CLI_SRC  := $(SHARED) Sources/main.swift
+REPORT   := Sources/JSONReport.swift
+CLI_SRC  := $(SHARED) $(REPORT) Sources/main.swift
 GUI_SRC  := $(SHARED) Sources/gui/MenuBarApp.swift
+TEST_SRC := $(SHARED) $(REPORT) Tests/Tests.swift
 
-.PHONY: all build run watch gui open clean install uninstall
+.PHONY: all build run watch test gui open clean install uninstall
 
 all: build
 
@@ -22,6 +25,11 @@ run: build
 
 watch: build
 	./$(BIN) --watch 1
+
+# ---- Tests (pure-logic, no SMC hardware required) ----
+test: $(TEST_SRC)
+	@swiftc -parse-as-library -framework IOKit -o $(TEST_BIN) $(TEST_SRC)
+	@./$(TEST_BIN)
 
 # ---- Menu-bar GUI (.app bundle) ----
 gui: $(APP)
@@ -41,7 +49,7 @@ open: gui
 
 # ---- housekeeping ----
 clean:
-	rm -rf $(BIN) $(GUI_BIN) $(APP)
+	rm -rf $(BIN) $(GUI_BIN) $(APP) $(TEST_BIN)
 
 install: build
 	install -d $(PREFIX)/bin
