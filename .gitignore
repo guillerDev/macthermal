@@ -1,5 +1,7 @@
-# Compiled binary (built by `make`)
+# Compiled artifacts (built by `make`)
 /macthermal
+/macthermal-gui
+/macthermal.app/
 
 # Build / object artifacts
 *.o
