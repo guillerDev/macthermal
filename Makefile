@@ -28,6 +28,7 @@ gui: $(APP)
 
 $(APP): $(GUI_SRC) Resources/Info.plist
 	swiftc -O -parse-as-library -framework IOKit -framework SwiftUI -framework AppKit \
+		-framework ServiceManagement \
 		-o $(GUI_BIN) $(GUI_SRC)
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS

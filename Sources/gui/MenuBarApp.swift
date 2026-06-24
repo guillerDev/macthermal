@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import Combine
+import ServiceManagement
 
 // MARK: - Severity → SwiftUI color
 
@@ -82,21 +84,150 @@ final class ThermalMonitor: ObservableObject {
     }
 }
 
+// MARK: - Launch at login
+//
+// Uses the modern ServiceManagement API (macOS 13+): `SMAppService.mainApp`
+// registers *this* app bundle as a login item — no helper bundle and none of
+// the deprecated `SMLoginItemSetEnabled` plumbing. Toggled from the status-item
+// right-click menu below.
+
+enum LaunchAtLogin {
+    static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+
+    /// Registers or unregisters the app as a login item. Returns `false` (and
+    /// logs) if the system rejected the change — e.g. an unsigned build run
+    /// from a transient location.
+    @discardableResult
+    static func set(_ enabled: Bool) -> Bool {
+        do {
+            switch (enabled, SMAppService.mainApp.status) {
+            case (true, let s) where s != .enabled:   try SMAppService.mainApp.register()
+            case (false, .enabled):                    try SMAppService.mainApp.unregister()
+            default:                                   break   // already in the desired state
+            }
+            return true
+        } catch {
+            NSLog("macthermal: could not change launch-at-login state: \(error.localizedDescription)")
+            return false
+        }
+    }
+}
+
 // MARK: - App
+//
+// The whole app lives in the status bar. SwiftUI's `MenuBarExtra` can't tell a
+// left- from a right-click, so the status item is driven directly with AppKit
+// (see `StatusItemController`): left-click opens the SwiftUI panel in a popover,
+// right-click shows a small menu with the "Open at Login" toggle and Quit.
 
 @main
 struct MacThermalApp: App {
-    @StateObject private var monitor = ThermalMonitor()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            PanelView(monitor: monitor)
-        } label: {
-            // Menu-bar title: thermometer + hottest temp.
-            Image(systemName: "thermometer.medium")
-            Text(monitor.menuBarText)
+        // No real window — `Settings` just satisfies the `App` scene
+        // requirement without showing anything (the UI is the status item).
+        Settings { EmptyView() }
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var controller: StatusItemController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        controller = StatusItemController()
+    }
+}
+
+// MARK: - Status-item controller
+
+@MainActor
+final class StatusItemController {
+    private let monitor = ThermalMonitor()
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let popover = NSPopover()
+    private var cancellable: AnyCancellable?
+
+    init() {
+        popover.behavior = .transient
+        popover.contentViewController = NSHostingController(rootView: PanelView(monitor: monitor))
+
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: "thermometer.medium",
+                                   accessibilityDescription: "Temperature")
+            button.imagePosition = .imageLeading
+            button.target = self
+            button.action = #selector(handleClick)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-        .menuBarExtraStyle(.window)
+        updateTitle()
+
+        // Mirror the monitor's published readings onto the menu-bar title.
+        cancellable = monitor.$temps
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updateTitle() }
+    }
+
+    private func updateTitle() {
+        statusItem.button?.title = " " + monitor.menuBarText
+    }
+
+    @objc private func handleClick() {
+        let isRightClick = NSApp.currentEvent.map {
+            $0.type == .rightMouseUp || $0.modifierFlags.contains(.control)
+        } ?? false
+
+        if isRightClick {
+            showMenu()
+        } else {
+            togglePopover()
+        }
+    }
+
+    private func togglePopover() {
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+    }
+
+    private func showMenu() {
+        guard let button = statusItem.button else { return }
+
+        let menu = NSMenu()
+
+        let loginItem = NSMenuItem(title: "Open at Login",
+                                   action: #selector(toggleLaunchAtLogin),
+                                   keyEquivalent: "")
+        loginItem.target = self
+        loginItem.state = LaunchAtLogin.isEnabled ? .on : .off
+        menu.addItem(loginItem)
+
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(title: "Quit macthermal",
+                                  action: #selector(quit),
+                                  keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        // Pop the menu up just under the button rather than assigning it to the
+        // status item permanently (which would steal the left-click that opens
+        // the panel).
+        menu.popUp(positioning: nil,
+                   at: NSPoint(x: 0, y: button.bounds.height + 4),
+                   in: button)
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        LaunchAtLogin.set(!LaunchAtLogin.isEnabled)
+    }
+
+    @objc private func quit() {
+        NSApplication.shared.terminate(nil)
     }
 }
 

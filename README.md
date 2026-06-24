@@ -52,12 +52,17 @@ Fanless Macs (e.g. MacBook Air) report no fans, which is expected.
 
 `make gui` builds `macthermal.app` — a lightweight menu-bar agent (`LSUIElement`,
 no Dock icon) that shows the hottest temperature next to a thermometer icon in
-the menu bar and refreshes every few seconds. Clicking it opens a panel with:
+the menu bar and refreshes every few seconds. **Left-clicking** opens a panel with:
 
 - the OS thermal-pressure state (color-coded dot),
 - the hottest temperature per component (CPU / GPU / memory / battery / …),
 - per-fan RPM with a utilization bar,
 - the overall hotspot, plus Refresh / Quit.
+
+**Right-clicking** (or control-clicking) the icon opens a small menu with an
+**Open at Login** toggle — so the app can start automatically on every login —
+plus Quit. Launch-at-login uses the modern `SMAppService` API (macOS 13+), so
+there is no helper bundle and nothing to configure by hand.
 
 It shares the exact same SMC reader as the CLI (`Sources/Sensors.swift`); the
 IOKit connection is isolated in an `actor` so all sensor reads happen off the
@@ -65,11 +70,13 @@ main thread and only immutable snapshots reach SwiftUI.
 
 ```sh
 make open          # build + launch
-# to run at login: System Settings ▸ General ▸ Login Items ▸ add macthermal.app
+# to run at login: right-click the menu-bar icon ▸ Open at Login
 ```
 
 The app is ad-hoc code-signed during the build so it runs locally on Apple
-Silicon without a developer certificate.
+Silicon without a developer certificate. (Launch-at-login works with the
+ad-hoc build as long as `macthermal.app` stays put; for distribution, sign it
+with a Developer ID so the registration survives moves and Gatekeeper.)
 
 ## How it works
 
