@@ -1,0 +1,10 @@
+# Compiled binary (built by `make`)
+/macthermal
+
+# Build / object artifacts
+*.o
+*.swiftmodule
+.build/
+
+# macOS
+.DS_Store
