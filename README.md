@@ -14,6 +14,7 @@ Works on both **Apple Silicon** (M-series, hundreds of on-die sensors) and
 make            # CLI  -> ./macthermal
 make gui        # GUI  -> ./macthermal.app (menu-bar app)
 make open       # build the app and launch it
+make test       # run the pure-logic test suite (no SMC hardware needed)
 make install    # copy the CLI to /usr/local/bin (PREFIX=... to change)
 ```
 
@@ -80,6 +81,11 @@ Silicon without a developer certificate.
   the fan block (`FNum`, `F<i>Ac/Mn/Mx/Tg`).
 - Decodes the SMC fixed-point / float encodings, then categorizes sensors by
   key prefix (`Tp`/`Te` cores, `Tg` GPU, `TB` battery, …) for the summary.
+- Caches the key list and each key's type/size for the life of the SMC
+  connection (neither changes at runtime). The first capture enumerates every
+  key (~2,300 on Apple Silicon); every refresh after that reads only the known
+  sensor values — roughly a **25× speedup**, which matters for the menu-bar app
+  and `--watch`, both of which refresh continuously.
 
 ### Note on the struct layout
 

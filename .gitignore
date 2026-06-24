@@ -1,6 +1,9 @@
 # Compiled binary (built by `make`)
 /macthermal
 
+# Test runner (built by `make test`)
+/.macthermal-tests
+
 # Build / object artifacts
 *.o
 *.swiftmodule

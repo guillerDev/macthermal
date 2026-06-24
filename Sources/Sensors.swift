@@ -108,10 +108,12 @@ struct ThermalState {
 
 func collectTemps(_ smc: SMC) -> [TempReading] {
     var out: [TempReading] = []
-    let keys = (try? smc.allKeys()) ?? []
-    for key in keys where key.hasPrefix("T") {
-        guard let v = try? smc.read(key), v.type == "flt " || v.type == "sp78",
-              let c = v.double, c > 1, c < 130 else { continue }
+    // `temperatureKeys()` has already filtered to `T…` keys of a temperature
+    // type (and caches that set), so here we only read each one's live value
+    // and apply a plausibility range to drop spurious readings.
+    let keys = (try? smc.temperatureKeys()) ?? []
+    for key in keys {
+        guard let v = try? smc.read(key), let c = v.double, c > 1, c < 130 else { continue }
         out.append(TempReading(key: key, label: label(for: key), category: categorize(key), celsius: c))
     }
     return out.sorted { $0.celsius > $1.celsius }
