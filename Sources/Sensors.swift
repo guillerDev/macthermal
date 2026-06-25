@@ -106,6 +106,12 @@ struct ThermalState {
 
 // MARK: - Collection
 
+// Plausibility bounds (°C) for a temperature reading: a disconnected sensor
+// reads ~0, and no real on-die sensor sits at or above 130 °C, so anything
+// outside this open range is treated as spurious and dropped.
+private let minPlausibleCelsius = 1.0
+private let maxPlausibleCelsius = 130.0
+
 func collectTemps(_ smc: SMC) -> [TempReading] {
     var out: [TempReading] = []
     // `temperatureKeys()` has already filtered to `T…` keys of a temperature
@@ -113,7 +119,8 @@ func collectTemps(_ smc: SMC) -> [TempReading] {
     // and apply a plausibility range to drop spurious readings.
     let keys = (try? smc.temperatureKeys()) ?? []
     for key in keys {
-        guard let v = try? smc.read(key), let c = v.double, c > 1, c < 130 else { continue }
+        guard let v = try? smc.read(key), let c = v.double,
+              c > minPlausibleCelsius, c < maxPlausibleCelsius else { continue }
         out.append(TempReading(key: key, label: label(for: key), category: categorize(key), celsius: c))
     }
     return out.sorted { $0.celsius > $1.celsius }
