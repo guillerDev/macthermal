@@ -22,8 +22,11 @@ func parseArgs(_ args: [String]) -> Options {
         case "--help", "-h": o.help = true
         case "--watch", "-w":
             var interval = 2.0
-            if i + 1 < args.count, let v = Double(args[i + 1]) { interval = v; i += 1 }
-            o.watch = max(0.25, interval)
+            if i + 1 < args.count, let v = Double(args[i + 1]) {
+                i += 1                          // consume the token even if it's nan/inf…
+                if v.isFinite { interval = v }  // …but only a finite value sets the interval
+            }
+            o.watch = min(max(0.25, interval), 86_400)   // clamp to [0.25s, 1 day]
         default:
             FileHandle.standardError.write("warning: unknown option '\(args[i])'\n".data(using: .utf8)!)
         }
@@ -181,6 +184,10 @@ There is also a menu-bar GUI — build it with `make gui`, then `open macthermal
 
 // MARK: - Entry point
 
+// Set from the SIGINT/SIGTERM handler in `--watch` mode. `sig_atomic_t` is the
+// only type the C standard guarantees is safe to touch from a signal handler.
+var stopRequested: sig_atomic_t = 0
+
 func runOnce(_ smc: SMC, _ opts: Options) {
     let temps = collectTemps(smc)
     let fans = collectFans(smc)
@@ -207,11 +214,11 @@ do {
 }
 
 if let interval = opts.watch {
-    // Hide cursor, restore on exit.
-    let sigHandler: @convention(c) (Int32) -> Void = { _ in
-        print("\u{1b}[?25h", terminator: "")  // show cursor
-        exit(0)
-    }
+    // Async-signal-safe quit: the handler only performs a single atomic store
+    // (the previous version called print()/exit(), which are not async-signal-
+    // safe). The render loop notices the flag and exits cleanly, restoring the
+    // cursor from normal code.
+    let sigHandler: @convention(c) (Int32) -> Void = { _ in stopRequested = 1 }
     signal(SIGINT, sigHandler)
     signal(SIGTERM, sigHandler)
 
@@ -220,7 +227,7 @@ if let interval = opts.watch {
     print("\u{1b}[2J", terminator: "")     // one full clear, only at startup
     let fmt = ISO8601DateFormatter()
 
-    while true {
+    while stopRequested == 0 {
         let ts = fmt.string(from: Date())
         var frame = p.dim("macthermal · live · \(ts) · Ctrl-C to quit") + "\n\n"
         frame += opts.json
@@ -237,8 +244,17 @@ if let interval = opts.watch {
         out += "\u{1b}[J"
         FileHandle.standardOutput.write(out.data(using: .utf8)!)
 
-        Thread.sleep(forTimeInterval: interval)
+        // Interruptible wait: poll the stop flag in short slices so Ctrl-C is
+        // honored within ~100 ms regardless of how Thread.sleep treats signals.
+        var slept = 0.0
+        while stopRequested == 0 && slept < interval {
+            let slice = min(0.1, interval - slept)
+            Thread.sleep(forTimeInterval: slice)
+            slept += slice
+        }
     }
+
+    print("\u{1b}[?25h", terminator: "")  // restore cursor before exiting
 } else {
     runOnce(smc, opts)
 }
