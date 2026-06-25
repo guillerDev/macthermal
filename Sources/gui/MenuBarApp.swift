@@ -58,6 +58,10 @@ final class ThermalMonitor: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+        // Let the OS coalesce our wakeups with other timers instead of demanding
+        // a precise tick every `interval`s — a meaningful energy win for a
+        // long-lived menu-bar app, at no cost to a 3s-refresh UX.
+        timer?.tolerance = interval * 0.5
     }
 
     func refresh() {
@@ -68,9 +72,11 @@ final class ThermalMonitor: ObservableObject {
         Task {
             defer { refreshing = false }
             guard let snap = await reader.capture() else { return }
-            temps = snap.temps
-            fans = snap.fans
-            thermal = snap.thermal
+            // Only republish what actually changed, so an unchanged tick doesn't
+            // make SwiftUI re-diff the panel every interval for nothing.
+            if temps != snap.temps { temps = snap.temps }
+            if fans != snap.fans { fans = snap.fans }
+            if thermal != snap.thermal { thermal = snap.thermal }
         }
     }
 

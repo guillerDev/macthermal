@@ -51,7 +51,7 @@ func label(for key: String) -> String { knownLabels[key] ?? key }
 
 // MARK: - Data model
 
-struct TempReading { let key: String; let label: String; let category: Category; let celsius: Double }
+struct TempReading: Equatable { let key: String; let label: String; let category: Category; let celsius: Double }
 
 extension Array where Element == TempReading {
     /// Mean temperature across the readings (0 when empty). Shared so the CLI,
@@ -59,7 +59,7 @@ extension Array where Element == TempReading {
     var averageCelsius: Double { isEmpty ? 0 : map { $0.celsius }.reduce(0, +) / Double(count) }
 }
 
-struct FanReading {
+struct FanReading: Equatable {
     let index: Int
     let rpm: Double
     let min: Double
@@ -94,7 +94,7 @@ func fanLevel(_ u: Double) -> (label: String, severity: Severity) {
 // The Apple Silicon-supported equivalent of the legacy Intel `pmset -g therm`
 // thermal levels (which report "unsupported on this machine" on M-series).
 
-struct ThermalState {
+struct ThermalState: Equatable {
     let name: String
     let note: String
     let severity: Severity

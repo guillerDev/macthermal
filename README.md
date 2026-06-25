@@ -8,6 +8,9 @@ plain-English verdict).
 Works on both **Apple Silicon** (M-series, hundreds of on-die sensors) and
 **Intel** Macs. No `sudo`, no third-party libraries.
 
+> Contributing or using an AI assistant on this repo? See [AGENTS.md](AGENTS.md)
+> for build/test commands, architecture, and the non-obvious gotchas.
+
 ## Build
 
 ```sh
