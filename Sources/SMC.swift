@@ -67,42 +67,60 @@ struct SMCValue {
     /// Handles the float/fixed-point encodings used for temperature and fans.
     var double: Double? {
         var b = bytes
-        return withUnsafeBytes(of: &b) { raw -> Double? in
-            let p = raw.bindMemory(to: UInt8.self)
-            // Big-endian reads, each guarded by the key's declared size so a
-            // too-short key decodes to nil rather than reading padding bytes.
-            let u16: UInt16 = size >= 2 ? UInt16(p[0]) << 8 | UInt16(p[1]) : 0
-            let signed: Double = Double(Int16(bitPattern: u16))   // for sp78/si16
-            let unsigned: Double = Double(u16)                    // for fpXY/ui16
-            switch type {
-            case "flt ":
-                guard size >= 4 else { return nil }
-                let bits = UInt32(p[0]) | UInt32(p[1]) << 8 | UInt32(p[2]) << 16 | UInt32(p[3]) << 24
-                return Double(Float(bitPattern: bits))
-            case "ui8 ", "ui8":
-                return size >= 1 ? Double(p[0]) : nil
-            case "ui16":
-                return size >= 2 ? unsigned : nil
-            case "ui32":
-                guard size >= 4 else { return nil }
-                return Double(UInt32(p[0]) << 24 | UInt32(p[1]) << 16 | UInt32(p[2]) << 8 | UInt32(p[3]))
-            case "si8 ", "si8":
-                return size >= 1 ? Double(Int8(bitPattern: p[0])) : nil
-            case "si16":
-                return size >= 2 ? signed : nil
-            // Signed/unsigned fixed-point: a big-endian u16 over a power-of-two divisor.
-            case "sp78": return size >= 2 ? signed / 256.0 : nil
-            case "fpe2": return size >= 2 ? unsigned / 4.0 : nil
-            case "fp2e": return size >= 2 ? unsigned / 16384.0 : nil
-            case "fp1f": return size >= 2 ? unsigned / 32768.0 : nil
-            case "fp4c": return size >= 2 ? unsigned / 4096.0 : nil
-            case "fp5b": return size >= 2 ? unsigned / 2048.0 : nil
-            case "fp6a": return size >= 2 ? unsigned / 1024.0 : nil
-            case "fp79": return size >= 2 ? unsigned / 512.0 : nil
-            case "fp88": return size >= 2 ? unsigned / 256.0 : nil
-            default:
-                return nil
-            }
+        return withUnsafeBytes(of: &b) { raw in
+            SMCValue.decode(type: type, size: size, p: raw.bindMemory(to: UInt8.self))
+        }
+    }
+
+    // Unsigned fixed-point family: a big-endian u16 divided by 2^fractionalBits.
+    private static let fixedPointDivisors: [String: Double] = [
+        "fpe2": 4, "fp2e": 16384, "fp1f": 32768, "fp4c": 4096,
+        "fp5b": 2048, "fp6a": 1024, "fp79": 512, "fp88": 256,
+    ]
+
+    // Split out of the `double` accessor: each byte read is its own explicitly
+    // typed statement so the type-checker resolves it quickly (the inlined
+    // shift-chain + ternary switch blew its budget). Reads are big-endian and
+    // size-guarded so a too-short key decodes to nil rather than reading padding.
+    private static func decode(type: String, size: UInt32, p: UnsafeBufferPointer<UInt8>) -> Double? {
+        func u16be() -> UInt16 {
+            let hi = UInt16(p[0]) << 8
+            let lo = UInt16(p[1])
+            return hi | lo
+        }
+        func u32be() -> UInt32 {
+            let b0 = UInt32(p[0]) << 24
+            let b1 = UInt32(p[1]) << 16
+            let b2 = UInt32(p[2]) << 8
+            let b3 = UInt32(p[3])
+            return b0 | b1 | b2 | b3
+        }
+        func fltLE() -> Float {
+            let b0 = UInt32(p[0])
+            let b1 = UInt32(p[1]) << 8
+            let b2 = UInt32(p[2]) << 16
+            let b3 = UInt32(p[3]) << 24
+            return Float(bitPattern: b0 | b1 | b2 | b3)
+        }
+
+        switch type {
+        case "flt ":
+            return size >= 4 ? Double(fltLE()) : nil
+        case "ui8 ", "ui8":
+            return size >= 1 ? Double(p[0]) : nil
+        case "ui16":
+            return size >= 2 ? Double(u16be()) : nil
+        case "ui32":
+            return size >= 4 ? Double(u32be()) : nil
+        case "si8 ", "si8":
+            return size >= 1 ? Double(Int8(bitPattern: p[0])) : nil
+        case "si16":
+            return size >= 2 ? Double(Int16(bitPattern: u16be())) : nil
+        case "sp78":
+            return size >= 2 ? Double(Int16(bitPattern: u16be())) / 256.0 : nil
+        default:
+            guard size >= 2, let divisor = fixedPointDivisors[type] else { return nil }
+            return Double(u16be()) / divisor
         }
     }
 }

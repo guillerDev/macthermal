@@ -81,6 +81,11 @@ see `Makefile`: `SHARED`, `CLI_SRC`, `GUI_SRC`, `TEST_SRC`.
   in a plausible `1–130 °C` range (drops spurious/zero sensors).
 - **`categorize` is intentionally case-sensitive** — SMC key naming is
   (`Tp`=P-core, `Te`=E-core, `Tg`/`TG`=GPU, `TB`=battery, `Tm`/`TM`=memory).
+- **`SMCValue.decode` is split into typed statements on purpose.** Keep the
+  per-byte reads (`u16be`/`u32be`/`fltLE`) and the divisor lookup as separate,
+  explicitly-typed steps. Collapsing them into one inline `|`/`<<` shift-chain or
+  a big ternary `switch` triggers "unable to type-check this expression in
+  reasonable time" — don't let a formatter re-inline it.
 
 ## Naming
 
