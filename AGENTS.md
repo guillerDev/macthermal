@@ -44,7 +44,6 @@ and needs no hardware.
 | `Sources/gui/MenuBarApp.swift` | GUI only: `SMCReader` actor, `ThermalMonitor` (`@MainActor` `ObservableObject`), SwiftUI views, `@main`. |
 | `Tests/Tests.swift` | Standalone test runner (`@main`), no XCTest. |
 | `Resources/Info.plist` | App bundle plist (`LSUIElement`, bundle id, exec name). |
-| `Formula/macthermal.rb` | Staged Homebrew formula (belongs in a tap repo). |
 
 The three build targets are just different file sets over the shared core —
 see `Makefile`: `SHARED`, `CLI_SRC`, `GUI_SRC`, `TEST_SRC`.
