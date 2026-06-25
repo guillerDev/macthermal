@@ -1,6 +1,23 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Temperature unit (GUI display only)
+//
+// Readings stay in Celsius everywhere in the sensor layer (and in the CLI/JSON);
+// this is purely a presentation choice for the menu-bar app.
+
+enum TempUnit: String, CaseIterable, Identifiable {
+    case celsius, fahrenheit
+    var id: String { rawValue }
+    var symbol: String { self == .celsius ? "°C" : "°F" }
+    var name: String { self == .celsius ? "Celsius" : "Fahrenheit" }
+    func convert(_ c: Double) -> Double { self == .celsius ? c : c * 9.0 / 5.0 + 32.0 }
+    /// Formats a Celsius value in this unit, e.g. `65°C` / `149°F`.
+    func format(_ c: Double, decimals: Int = 1) -> String {
+        String(format: "%.\(decimals)f%@", convert(c), symbol)
+    }
+}
+
 // MARK: - Severity → SwiftUI color
 
 extension Severity {
@@ -45,12 +62,18 @@ final class ThermalMonitor: ObservableObject {
     @Published var thermal = ThermalState.current()
     @Published var available = true
 
+    /// Display unit, persisted across launches. Sensor data stays in Celsius.
+    @Published var unit: TempUnit {
+        didSet { UserDefaults.standard.set(unit.rawValue, forKey: "tempUnit") }
+    }
+
     let interval: TimeInterval = 3
     private let reader = SMCReader()
     private var timer: Timer?
     private var refreshing = false
 
     init() {
+        unit = TempUnit(rawValue: UserDefaults.standard.string(forKey: "tempUnit") ?? "") ?? .celsius
         Task {
             available = await reader.available
             refresh()
@@ -86,7 +109,7 @@ final class ThermalMonitor: ObservableObject {
 
     var menuBarText: String {
         guard let h = hottest else { return "––" }
-        return String(format: "%.0f°", h.celsius)
+        return unit.format(h.celsius, decimals: 0)   // e.g. "65°C"
     }
     var menuBarSeverity: Severity {
         guard let h = hottest else { return .ok }
@@ -160,7 +183,7 @@ struct PanelView: View {
                 let lvl = tempLevel(hot.celsius)
                 HStack {
                     Text(cat.rawValue).frame(width: 64, alignment: .leading)
-                    Text(String(format: "%.1f°C", hot.celsius))
+                    Text(monitor.unit.format(hot.celsius))
                         .bold().foregroundStyle(lvl.severity.color)
                     Spacer()
                     Text("\(group.count) sensors · \(lvl.label)")
@@ -193,14 +216,25 @@ struct PanelView: View {
     }
 
     private var footer: some View {
-        HStack {
-            if let h = monitor.hottest {
-                Text(String(format: "Hotspot %.1f°C · %@", h.celsius, h.key))
-                    .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                if let h = monitor.hottest {
+                    Text("Hotspot \(monitor.unit.format(h.celsius)) · \(h.key)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Picker("", selection: $monitor.unit) {
+                    ForEach(TempUnit.allCases) { u in Text(u.symbol).tag(u) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 84)
             }
-            Spacer()
-            Button("Refresh") { monitor.refresh() }
-            Button("Quit") { NSApplication.shared.terminate(nil) }
+            HStack {
+                Spacer()
+                Button("Refresh") { monitor.refresh() }
+                Button("Quit") { NSApplication.shared.terminate(nil) }
+            }
         }
     }
 }
