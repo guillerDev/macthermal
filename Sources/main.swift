@@ -56,6 +56,14 @@ struct Palette {
 
 // MARK: - Rendering
 
+/// Left-justifies `s` to at least `width` columns (never truncates). Needed
+/// because `String(format:)` silently ignores the field width of `%@` on Apple
+/// platforms — `String(format: "%-9@", x)` does no padding at all, which is why
+/// the grouped-summary columns used to be misaligned.
+func pad(_ s: String, _ width: Int) -> String {
+    s.count >= width ? s : s + String(repeating: " ", count: width - s.count)
+}
+
 func renderHuman(temps: [TempReading], fans: [FanReading], opts: Options) -> String {
     let p = Palette(on: opts.color)
     var lines: [String] = []
@@ -74,8 +82,7 @@ func renderHuman(temps: [TempReading], fans: [FanReading], opts: Options) -> Str
             for t in temps {
                 let (st, sev) = tempLevel(t.celsius)
                 let val = p.paint(sev, String(format: "%6.1f°C", t.celsius))
-                lines.append(String(format: "  %-6@ %@  %@ %@",
-                                    t.key as NSString, val, p.dim(st), p.dim("· " + t.label)))
+                lines.append("  " + pad(t.key, 6) + " " + val + "  " + p.dim(st) + " " + p.dim("· " + t.label))
             }
         } else {
             // Group: show hottest per category
@@ -88,7 +95,7 @@ func renderHuman(temps: [TempReading], fans: [FanReading], opts: Options) -> Str
                 let val = p.paint(sev, String(format: "%5.1f°C", hottest.celsius))
                 let detail = p.dim(String(format: "avg %.1f°C · %d sensors · %@",
                                           avg, group.count, st))
-                lines.append(String(format: "  %-9@ %@  %@", cat.rawValue as NSString, val, detail))
+                lines.append("  " + pad(cat.rawValue, 9) + " " + val + "  " + detail)
             }
         }
         let hottest = temps.first!
@@ -145,26 +152,8 @@ func verdict(temps: [TempReading], fans: [FanReading]) -> String {
     return "All temperatures nominal. System is cool and idle-to-light."
 }
 
-func renderJSON(temps: [TempReading], fans: [FanReading]) -> String {
-    func obj(_ pairs: [(String, Any)]) -> String {
-        "{" + pairs.map { k, v in
-            let val: String
-            switch v {
-            case let s as String: val = "\"\(s)\""
-            case let d as Double: val = String(format: "%.2f", d)
-            case let i as Int: val = "\(i)"
-            default: val = "null"
-            }
-            return "\"\(k)\":\(val)"
-        }.joined(separator: ",") + "}"
-    }
-    let tj = temps.map { obj([("key", $0.key), ("label", $0.label), ("category", $0.category.rawValue), ("celsius", $0.celsius)]) }
-    let fj = fans.map { obj([("fan", $0.index + 1), ("rpm", $0.rpm), ("min", $0.min), ("max", $0.max), ("target", $0.target), ("utilization", $0.utilization)]) }
-    let hottest = temps.map { $0.celsius }.max() ?? 0
-    let avg = temps.isEmpty ? 0 : temps.map { $0.celsius }.reduce(0, +) / Double(temps.count)
-    let summary = obj([("thermalState", ThermalState.current().name), ("hottestC", hottest), ("averageC", avg), ("sensorCount", temps.count), ("fanCount", fans.count)])
-    return "{\"summary\":\(summary),\"temperatures\":[\(tj.joined(separator: ","))],\"fans\":[\(fj.joined(separator: ","))]}"
-}
+// `renderJSON` now lives in Sources/JSONReport.swift — a Codable-based encoder
+// that is shared with the test target and guarantees well-formed, escaped JSON.
 
 // MARK: - Help
 

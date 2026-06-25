@@ -3,6 +3,9 @@
 /macthermal-gui
 /macthermal.app/
 
+# Test runner (built by `make test`)
+/.macthermal-tests
+
 # Build / object artifacts
 *.o
 *.swiftmodule

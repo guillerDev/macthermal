@@ -138,6 +138,15 @@ enum SMCError: Error, CustomStringConvertible {
 final class SMC {
     private var connection: io_connect_t = 0
 
+    // Per-connection caches. The SMC key set, and each key's type/size, are
+    // fixed for the life of the connection — they never change at runtime — so
+    // we read them once and reuse them. This turns every *repeat* capture (the
+    // menu-bar app refreshes every few seconds; `--watch` every second) from a
+    // full ~2,300-key re-enumeration into a handful of value reads.
+    private var keyListCache: [String]?
+    private var keyInfoCache: [String: (type: String, size: UInt32)] = [:]
+    private var tempKeyCache: [String]?
+
     init() throws {
         let service = IOServiceGetMatchingService(
             kIOMainPortDefault, IOServiceMatching("AppleSMC"))
@@ -178,34 +187,58 @@ final class SMC {
         return fourCharString(out.key)
     }
 
-    /// Reads and decodes a single key by name.
-    func read(_ key: String) throws -> SMCValue {
+    /// Reads a key's type and size (the SMC "key info" command). Cached: a
+    /// key's metadata never changes, so this is a one-time cost per key.
+    private func info(for key: String) throws -> (type: String, size: UInt32) {
+        if let cached = keyInfoCache[key] { return cached }
         var info = SMCParamStruct()
         info.key = fourCharCode(key)
         info.data8 = SMC_CMD_READ_KEYINFO
-        let infoOut = try call(&info)
+        let out = try call(&info)
+        let meta = (type: fourCharString(out.keyInfoDataType), size: out.keyInfoDataSize)
+        keyInfoCache[key] = meta
+        return meta
+    }
+
+    /// Reads and decodes a single key by name. Uses cached key metadata, so a
+    /// repeat read costs a single IOKit call (the value) instead of two.
+    func read(_ key: String) throws -> SMCValue {
+        let meta = try info(for: key)
 
         var data = SMCParamStruct()
         data.key = fourCharCode(key)
-        data.keyInfoDataSize = infoOut.keyInfoDataSize
+        data.keyInfoDataSize = meta.size
         data.data8 = SMC_CMD_READ_BYTES
         let dataOut = try call(&data)
 
-        return SMCValue(
-            key: key,
-            type: fourCharString(infoOut.keyInfoDataType),
-            size: infoOut.keyInfoDataSize,
-            bytes: dataOut.bytes)
+        return SMCValue(key: key, type: meta.type, size: meta.size, bytes: dataOut.bytes)
     }
 
-    /// Enumerates every key the SMC exposes.
+    /// Enumerates every key the SMC exposes. Cached after the first call.
     func allKeys() throws -> [String] {
+        if let keyListCache { return keyListCache }
         let count = try keyCount()
         var keys: [String] = []
         keys.reserveCapacity(Int(count))
         for i in 0..<count {
             if let k = try? key(at: i) { keys.append(k) }
         }
+        keyListCache = keys
+        return keys
+    }
+
+    /// The subset of keys that are temperature sensors: a `T…` key whose type
+    /// is one of the temperature encodings. Fixed per machine, so it is
+    /// computed once; repeat captures then read only these keys' live values.
+    func temperatureKeys() throws -> [String] {
+        if let tempKeyCache { return tempKeyCache }
+        var keys: [String] = []
+        for k in try allKeys() where k.hasPrefix("T") {
+            if let meta = try? info(for: k), meta.type == "flt " || meta.type == "sp78" {
+                keys.append(k)
+            }
+        }
+        tempKeyCache = keys
         return keys
     }
 }
