@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          sw_vers
+          swift --version
+
+      # Pure-logic suite — decoding, thresholds, categorization, JSON.
+      # Needs no SMC hardware, so it runs anywhere.
+      - name: Run tests
+        run: make test
+
+      - name: Build CLI
+        run: make build
+
+      # `--help` exits before any SMC connection is opened, so it's safe on
+      # virtualized runners that may not expose AppleSMC. Do NOT run the CLI
+      # with no args here — that would try to read the SMC.
+      - name: Smoke-test CLI
+        run: ./macthermal --help
+
+      - name: Build menu-bar app
+        run: make gui
+
+      - name: Verify app bundle
+        run: |
+          test -f macthermal.app/Contents/MacOS/macthermal-gui
+          codesign -dv macthermal.app

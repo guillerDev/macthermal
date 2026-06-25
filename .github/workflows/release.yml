@@ -1,0 +1,75 @@
+name: Release
+
+# Fires when you push a version tag, e.g. `git tag v0.1.0 && git push --tags`.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release (e.g. v0.1.0)
+        required: true
+
+permissions:
+  contents: write   # needed to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & test
+        run: |
+          make test
+          make build
+          make gui
+
+      # The .app is ad-hoc signed and unnotarized, so Gatekeeper will quarantine
+      # it on download. Ship it zipped for convenience; users clear quarantine
+      # with: xattr -dr com.apple.quarantine macthermal.app
+      - name: Package menu-bar app
+        run: ditto -c -k --keepParent macthermal.app "macthermal-app-${TAG}.zip"
+
+      # GitHub auto-generates the source tarball for the tag; its sha256 is what
+      # the Homebrew formula needs. Compute it and surface it in the release notes.
+      - name: Compute source tarball sha256
+        id: sha
+        run: |
+          URL="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+          curl -fsSL "$URL" -o src.tar.gz
+          echo "value=$(shasum -a 256 src.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      # Quoted heredoc (<<'EOF') so the literal backticks below are NOT treated
+      # as shell command substitution. All placeholders are GitHub ${{ }}
+      # expressions, which are interpolated before the shell runs.
+      - name: Write release notes
+        run: |
+          cat > notes.md <<'EOF'
+          ### Install (Homebrew tap)
+
+          ```sh
+          brew install ${{ github.repository_owner }}/tap/macthermal
+          ```
+
+          ### Formula values for this release
+
+          ```ruby
+          url "https://github.com/${{ github.repository }}/archive/refs/tags/${{ env.TAG }}.tar.gz"
+          sha256 "${{ steps.sha.outputs.value }}"
+          ```
+
+          The attached `macthermal-app-*.zip` is the ad-hoc-signed menu-bar app.
+          After downloading: `xattr -dr com.apple.quarantine macthermal.app`
+          EOF
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${TAG}" \
+            "macthermal-app-${TAG}.zip" \
+            --title "${TAG}" \
+            --notes-file notes.md
