@@ -18,6 +18,9 @@ jobs:
     runs-on: macos-latest
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      # PAT with write access to <owner>/homebrew-tap. Optional: if unset, the
+      # tap-bump step is skipped and you update the formula manually.
+      TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -73,3 +76,22 @@ jobs:
             "macthermal-app-${TAG}.zip" \
             --title "${TAG}" \
             --notes-file notes.md
+
+      # Auto-bump the formula in <owner>/homebrew-tap so you never edit the
+      # sha256 by hand. Runs only when the TAP_GITHUB_TOKEN secret is set; the
+      # default GITHUB_TOKEN can't push to a different repository.
+      - name: Bump formula in homebrew-tap
+        if: ${{ env.TAP_TOKEN != '' }}
+        run: |
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/${GITHUB_REPOSITORY_OWNER}/homebrew-tap.git" tap
+          cd tap
+          # BSD sed (macOS runner): rewrite only the url + sha256 lines, keep indent.
+          sed -E -i '' \
+            -e "s|^( *)url \".*\"|\1url \"https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz\"|" \
+            -e "s|^( *)sha256 \".*\"|\1sha256 \"${{ steps.sha.outputs.value }}\"|" \
+            Formula/macthermal.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/macthermal.rb
+          git commit -m "macthermal ${TAG}" || { echo "formula already up to date"; exit 0; }
+          git push
