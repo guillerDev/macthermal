@@ -61,7 +61,11 @@ the menu bar and refreshes every few seconds. Clicking it opens a panel with:
 - the OS thermal-pressure state (color-coded dot),
 - the hottest temperature per component (CPU / GPU / memory / battery / …),
 - per-fan RPM with a utilization bar,
-- the overall hotspot, plus Refresh / Quit.
+- the overall hotspot,
+- the °C/°F unit toggle and an **Open at Login** checkbox, plus Refresh / Quit.
+
+The **Open at Login** checkbox registers the app as a login item via the modern
+`SMAppService` API (macOS 13+) — no helper bundle, nothing to configure by hand.
 
 It shares the exact same SMC reader as the CLI (`Sources/Sensors.swift`); the
 IOKit connection is isolated in an `actor` so all sensor reads happen off the
@@ -69,7 +73,7 @@ main thread and only immutable snapshots reach SwiftUI.
 
 ```sh
 make open          # build + launch
-# to run at login: System Settings ▸ General ▸ Login Items ▸ add macthermal.app
+# to run at login: open the panel and tick "Open at Login"
 ```
 
 The app is ad-hoc code-signed during the build so it runs locally on Apple
