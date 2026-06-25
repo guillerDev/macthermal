@@ -69,9 +69,11 @@ struct SMCValue {
         var b = bytes
         return withUnsafeBytes(of: &b) { raw -> Double? in
             let p = raw.bindMemory(to: UInt8.self)
-            // Big-endian integer reads, each guarded by the key's declared size
-            // so a too-short key decodes to nil rather than reading padding.
-            func u16() -> UInt16? { size >= 2 ? UInt16(p[0]) << 8 | UInt16(p[1]) : nil }
+            // Big-endian reads, each guarded by the key's declared size so a
+            // too-short key decodes to nil rather than reading padding bytes.
+            let u16: UInt16 = size >= 2 ? UInt16(p[0]) << 8 | UInt16(p[1]) : 0
+            let signed: Double = Double(Int16(bitPattern: u16))   // for sp78/si16
+            let unsigned: Double = Double(u16)                    // for fpXY/ui16
             switch type {
             case "flt ":
                 guard size >= 4 else { return nil }
@@ -80,24 +82,24 @@ struct SMCValue {
             case "ui8 ", "ui8":
                 return size >= 1 ? Double(p[0]) : nil
             case "ui16":
-                return u16().map(Double.init)
+                return size >= 2 ? unsigned : nil
             case "ui32":
                 guard size >= 4 else { return nil }
                 return Double(UInt32(p[0]) << 24 | UInt32(p[1]) << 16 | UInt32(p[2]) << 8 | UInt32(p[3]))
             case "si8 ", "si8":
                 return size >= 1 ? Double(Int8(bitPattern: p[0])) : nil
             case "si16":
-                return u16().map { Double(Int16(bitPattern: $0)) }
+                return size >= 2 ? signed : nil
             // Signed/unsigned fixed-point: a big-endian u16 over a power-of-two divisor.
-            case "sp78": return u16().map { Double(Int16(bitPattern: $0)) / 256.0 }
-            case "fpe2": return u16().map { Double($0) / 4.0 }
-            case "fp2e": return u16().map { Double($0) / 16384.0 }
-            case "fp1f": return u16().map { Double($0) / 32768.0 }
-            case "fp4c": return u16().map { Double($0) / 4096.0 }
-            case "fp5b": return u16().map { Double($0) / 2048.0 }
-            case "fp6a": return u16().map { Double($0) / 1024.0 }
-            case "fp79": return u16().map { Double($0) / 512.0 }
-            case "fp88": return u16().map { Double($0) / 256.0 }
+            case "sp78": return size >= 2 ? signed / 256.0 : nil
+            case "fpe2": return size >= 2 ? unsigned / 4.0 : nil
+            case "fp2e": return size >= 2 ? unsigned / 16384.0 : nil
+            case "fp1f": return size >= 2 ? unsigned / 32768.0 : nil
+            case "fp4c": return size >= 2 ? unsigned / 4096.0 : nil
+            case "fp5b": return size >= 2 ? unsigned / 2048.0 : nil
+            case "fp6a": return size >= 2 ? unsigned / 1024.0 : nil
+            case "fp79": return size >= 2 ? unsigned / 512.0 : nil
+            case "fp88": return size >= 2 ? unsigned / 256.0 : nil
             default:
                 return nil
             }
