@@ -92,18 +92,31 @@ final class ThermalMonitor: ObservableObject {
 // right-click menu below.
 
 enum LaunchAtLogin {
-    static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+    /// Current registration status. `.requiresApproval` means the user must
+    /// enable it under System Settings ▸ General ▸ Login Items.
+    static var status: SMAppService.Status { SMAppService.mainApp.status }
 
-    /// Registers or unregisters the app as a login item. Returns `false` (and
-    /// logs) if the system rejected the change — e.g. an unsigned build run
-    /// from a transient location.
+    /// Checkmark state for the menu item: on, mixed (registered but pending the
+    /// user's approval), or off.
+    static var menuItemState: NSControl.StateValue {
+        switch status {
+        case .enabled:          return .on
+        case .requiresApproval: return .mixed
+        default:                return .off
+        }
+    }
+
+    /// Toggles registration: registers when not registered, otherwise
+    /// unregisters — covering both `.enabled` and the pending `.requiresApproval`
+    /// state (so a single click always flips it). Returns `false`, and logs, if
+    /// the system rejected the change — e.g. an unsigned build run from a
+    /// transient location.
     @discardableResult
-    static func set(_ enabled: Bool) -> Bool {
+    static func toggle() -> Bool {
         do {
-            switch (enabled, SMAppService.mainApp.status) {
-            case (true, let s) where s != .enabled:   try SMAppService.mainApp.register()
-            case (false, .enabled):                    try SMAppService.mainApp.unregister()
-            default:                                   break   // already in the desired state
+            switch status {
+            case .enabled, .requiresApproval: try SMAppService.mainApp.unregister()
+            default:                          try SMAppService.mainApp.register()
             }
             return true
         } catch {
@@ -203,7 +216,7 @@ final class StatusItemController {
                                    action: #selector(toggleLaunchAtLogin),
                                    keyEquivalent: "")
         loginItem.target = self
-        loginItem.state = LaunchAtLogin.isEnabled ? .on : .off
+        loginItem.state = LaunchAtLogin.menuItemState
         menu.addItem(loginItem)
 
         menu.addItem(.separator())
@@ -223,7 +236,7 @@ final class StatusItemController {
     }
 
     @objc private func toggleLaunchAtLogin() {
-        LaunchAtLogin.set(!LaunchAtLogin.isEnabled)
+        LaunchAtLogin.toggle()
     }
 
     @objc private func quit() {
