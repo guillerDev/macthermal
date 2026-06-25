@@ -62,6 +62,10 @@ final class ThermalMonitor: ObservableObject {
     @Published var fans: [FanReading] = []
     @Published var thermal = ThermalState.current()
     @Published var available = true
+    /// Whether the app is registered as a login item. Loaded (and updated) off
+    /// the main thread — the backing `SMAppService` calls hit a daemon and are
+    /// slow, so the UI binds to this cached flag, never to a live query.
+    @Published var launchAtLogin = false
 
     /// Display unit, persisted across launches. Sensor data stays in Celsius.
     @Published var unit: TempUnit {
@@ -77,6 +81,7 @@ final class ThermalMonitor: ObservableObject {
         unit = TempUnit(rawValue: UserDefaults.standard.string(forKey: "tempUnit") ?? "") ?? .celsius
         Task {
             available = await reader.available
+            launchAtLogin = await Self.loginItemEnabled()
             refresh()
         }
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
@@ -102,6 +107,26 @@ final class ThermalMonitor: ObservableObject {
             if fans != snap.fans { fans = snap.fans }
             if thermal != snap.thermal { thermal = snap.thermal }
         }
+    }
+
+    /// Toggles launch-at-login optimistically: the published flag flips at once
+    /// so the checkbox responds instantly, then the slow, daemon-backed
+    /// `SMAppService` call runs off the main thread and the flag is reconciled to
+    /// the real status (so a failed register/unregister visibly reverts).
+    func setLaunchAtLogin(_ enabled: Bool) {
+        launchAtLogin = enabled
+        Task { launchAtLogin = await Self.applyLoginItem(enabled) }
+    }
+
+    // Run off the main actor (nonisolated async): `SMAppService` register /
+    // unregister / status are synchronous round-trips to the login-items daemon
+    // and must not block the UI.
+    nonisolated private static func loginItemEnabled() async -> Bool {
+        LaunchAtLogin.isEnabled
+    }
+    nonisolated private static func applyLoginItem(_ enabled: Bool) async -> Bool {
+        LaunchAtLogin.setEnabled(enabled)
+        return LaunchAtLogin.isEnabled
     }
 
     var hottest: TempReading? { temps.first }
@@ -185,11 +210,12 @@ struct PanelView: View {
         Category.allCases.filter { !monitor.group($0).isEmpty }
     }
 
-    /// Reflects and sets the login-item registration. Reads live on each render
-    /// so the checkbox matches reality even if it was changed in System Settings.
+    /// Bound to the monitor's cached flag so the checkbox flips instantly; the
+    /// (slow) registration runs off the main thread in `setLaunchAtLogin`. Reading
+    /// a plain Bool also avoids a live `SMAppService` query on every panel render.
     private var launchAtLogin: Binding<Bool> {
-        Binding(get: { LaunchAtLogin.isEnabled },
-                set: { LaunchAtLogin.setEnabled($0) })
+        Binding(get: { monitor.launchAtLogin },
+                set: { monitor.setLaunchAtLogin($0) })
     }
 
     var body: some View {
