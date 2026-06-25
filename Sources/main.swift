@@ -22,8 +22,11 @@ func parseArgs(_ args: [String]) -> Options {
         case "--help", "-h": o.help = true
         case "--watch", "-w":
             var interval = 2.0
-            if i + 1 < args.count, let v = Double(args[i + 1]), v.isFinite { interval = v; i += 1 }
-            o.watch = min(max(0.25, interval), 86_400)   // reject NaN/∞; clamp to [0.25s, 1 day]
+            if i + 1 < args.count, let v = Double(args[i + 1]) {
+                i += 1                          // consume the token even if it's nan/inf…
+                if v.isFinite { interval = v }  // …but only a finite value sets the interval
+            }
+            o.watch = min(max(0.25, interval), 86_400)   // clamp to [0.25s, 1 day]
         default:
             FileHandle.standardError.write("warning: unknown option '\(args[i])'\n".data(using: .utf8)!)
         }

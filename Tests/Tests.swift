@@ -60,6 +60,7 @@ struct Tests {
         expect(clampedCount(-5, upperBound: 8192) == 0, "clampedCount(negative) = 0")
         expect(clampedCount(3, upperBound: 8192) == 3, "clampedCount(3) = 3")
         expect(clampedCount(1e12, upperBound: 8192) == 8192, "clampedCount(huge) = upperBound")
+        expect(clampedCount(1e300, upperBound: 8192) == 8192, "clampedCount(> Int.max) = upperBound (no trap)")
 
         // --- temperature thresholds ---
         expect(tempLevel(59.9).label == "cool" && tempLevel(59.9).severity == .ok, "tempLevel < 60 = cool")

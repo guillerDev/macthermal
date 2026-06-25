@@ -111,7 +111,10 @@ struct ThermalState {
 /// otherwise crash an `Int(_:)` conversion or blow up an allocation.
 func clampedCount(_ raw: Double, upperBound: Int) -> Int {
     guard raw.isFinite, raw >= 0 else { return 0 }
-    return min(Int(raw), upperBound)
+    // Clamp as a Double *before* converting: `Int(raw)` traps for finite values
+    // larger than Int.max (e.g. a garbage float-typed key), which is exactly the
+    // crash this helper exists to prevent.
+    return Int(min(raw, Double(upperBound)))
 }
 
 // MARK: - Collection

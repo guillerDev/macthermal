@@ -268,20 +268,24 @@ final class SMC {
     }
 
     /// Number of fans (`FNum`), clamped and cached. Bounds a corrupt count the
-    /// same way `keyCount()` does.
+    /// same way `keyCount()` does. Caches only on a successful read+decode so a
+    /// transient failure doesn't permanently pin the count to 0.
     func fanCount() -> Int {
         if let fanCountCache { return fanCountCache }
-        let raw = (try? read("FNum"))?.double ?? 0
+        guard let raw = (try? read("FNum"))?.double else { return 0 }
         let n = clampedCount(raw, upperBound: 64)
         fanCountCache = n
         return n
     }
 
-    /// Static min/max RPM limits for fan `i` (hardware-fixed; cached).
+    /// Static min/max RPM limits for fan `i` (hardware-fixed; cached). Caches
+    /// only when both limits decode, so a failed first attempt can be retried
+    /// instead of masking the metadata for the connection's lifetime.
     func fanLimits(_ i: Int) -> (min: Double, max: Double) {
         if let cached = fanLimitsCache[i] { return cached }
-        let limits = (min: (try? read("F\(i)Mn"))?.double ?? 0,
-                      max: (try? read("F\(i)Mx"))?.double ?? 0)
+        guard let mn = (try? read("F\(i)Mn"))?.double,
+              let mx = (try? read("F\(i)Mx"))?.double else { return (0, 0) }
+        let limits = (min: mn, max: mx)
         fanLimitsCache[i] = limits
         return limits
     }
