@@ -109,3 +109,35 @@ IOKit call fail with `kIOReturnBadArgument`. `SMC.swift` therefore uses a
 | ≥ 100 °C    | critical |                 |          |
 
 These are heuristics for a quick health read, not vendor-spec throttle points.
+
+## Releasing
+
+Releases are cut by pushing a version tag — the
+[`release` workflow](.github/workflows/release.yml) does the rest on a macOS
+runner. (Requires the repo to be on GitHub; Actions doesn't run locally.)
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0      # or: git push --tags
+```
+
+On that tag push the workflow:
+
+1. runs `make test`, then `make build` and `make gui`;
+2. zips the ad-hoc-signed app as `macthermal-app-v0.1.0.zip`;
+3. downloads the tag's auto-generated source tarball and computes its `sha256`;
+4. creates a **GitHub Release** with the app zip attached and notes that contain
+   the ready-to-paste Homebrew `url` + `sha256`.
+
+You can also trigger it manually from **Actions ▸ Release ▸ Run workflow** (enter
+the tag). Either way, copy the `url`/`sha256` from the release notes into
+`Formula/macthermal.rb` in your tap to publish the new version:
+
+```ruby
+url "https://github.com/<owner>/macthermal/archive/refs/tags/v0.1.0.tar.gz"
+sha256 "<value from the release notes>"
+```
+
+Use [semver](https://semver.org) tags (`vMAJOR.MINOR.PATCH`). The release job
+needs `contents: write` (set in the workflow; confirm it's allowed under
+**Settings ▸ Actions ▸ Workflow permissions**).
