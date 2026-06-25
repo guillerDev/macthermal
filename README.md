@@ -112,48 +112,6 @@ These are heuristics for a quick health read, not vendor-spec throttle points.
 
 ## Releasing
 
-Releases are cut by pushing a version tag — the
-[`release` workflow](.github/workflows/release.yml) does the rest on a macOS
-runner. (Requires the repo to be on GitHub; Actions doesn't run locally.)
-
-```sh
-git tag v0.1.0
-git push origin v0.1.0      # or: git push --tags
-```
-
-On that tag push the workflow:
-
-1. runs `make test`, then `make build` and `make gui`;
-2. zips the ad-hoc-signed app as `macthermal-app-v0.1.0.zip`;
-3. downloads the tag's auto-generated source tarball and computes its `sha256`;
-4. creates a **GitHub Release** with the app zip attached and notes that contain
-   the Homebrew `url` + `sha256`;
-5. **bumps the formula** in `homebrew-tap` automatically (see below).
-
-You can also trigger it manually from **Actions ▸ Release ▸ Run workflow** (enter
-the tag). Use [semver](https://semver.org) tags (`vMAJOR.MINOR.PATCH`).
-
-### Automatic formula bump
-
-Step 5 rewrites `Formula/macthermal.rb` in the tap with the new `url` + `sha256`
-and pushes it — so a release is just `git push --tags`, no manual hash editing.
-It runs only when a `TAP_GITHUB_TOKEN` secret is present (the default
-`GITHUB_TOKEN` can't push to a *different* repo). To enable it once:
-
-1. Create a **fine-grained Personal Access Token** scoped to the
-   `homebrew-tap` repo with **Contents: read & write**
-   (Settings ▸ Developer settings ▸ Personal access tokens ▸ Fine-grained).
-2. In the **macthermal** repo, add it under
-   **Settings ▸ Secrets and variables ▸ Actions ▸ New repository secret**,
-   named `TAP_GITHUB_TOKEN`.
-
-If the secret is absent, the bump step is skipped and you instead copy the
-`url`/`sha256` from the release notes into the tap formula by hand:
-
-```ruby
-url "https://github.com/<owner>/macthermal/archive/refs/tags/v0.1.0.tar.gz"
-sha256 "<value from the release notes>"
-```
-
-The release job also needs `contents: write` (set in the workflow; confirm it's
-allowed under **Settings ▸ Actions ▸ Workflow permissions**).
+Cutting a release is just pushing a version tag; CI builds, publishes a GitHub
+Release, and updates the Homebrew tap. See **[docs/RELEASING.md](docs/RELEASING.md)**
+for the full process and the one-time tap-token setup.
