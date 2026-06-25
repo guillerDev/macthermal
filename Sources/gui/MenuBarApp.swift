@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
 
 // MARK: - Temperature unit (GUI display only)
 //
@@ -117,6 +118,46 @@ final class ThermalMonitor: ObservableObject {
     }
 }
 
+// MARK: - Launch at login
+//
+// Uses the modern ServiceManagement API (macOS 13+): `SMAppService.mainApp`
+// registers this very app bundle as a login item — no helper bundle and none of
+// the deprecated `SMLoginItemSetEnabled` plumbing.
+
+enum LaunchAtLogin {
+    /// On when the app is registered as a login item — including the
+    /// `.requiresApproval` state (registered, but the user must enable it under
+    /// System Settings ▸ General ▸ Login Items).
+    static var isEnabled: Bool {
+        switch SMAppService.mainApp.status {
+        case .enabled, .requiresApproval: return true
+        default:                          return false
+        }
+    }
+
+    /// Registers/unregisters the app as a login item. Registers only from a
+    /// not-registered state and unregisters from any active/pending one, so it
+    /// never re-registers an already-pending item. Failures are logged, not
+    /// fatal (e.g. an unsigned build run from a transient location).
+    @discardableResult
+    static func setEnabled(_ enabled: Bool) -> Bool {
+        do {
+            switch (enabled, SMAppService.mainApp.status) {
+            case (true, .notRegistered), (true, .notFound):
+                try SMAppService.mainApp.register()
+            case (false, .enabled), (false, .requiresApproval):
+                try SMAppService.mainApp.unregister()
+            default:
+                break   // already in the desired state
+            }
+            return true
+        } catch {
+            NSLog("macthermal: could not change launch-at-login state: \(error.localizedDescription)")
+            return false
+        }
+    }
+}
+
 // MARK: - App
 
 @main
@@ -142,6 +183,13 @@ struct PanelView: View {
 
     private var categoriesWithData: [Category] {
         Category.allCases.filter { !monitor.group($0).isEmpty }
+    }
+
+    /// Reflects and sets the login-item registration. Reads live on each render
+    /// so the checkbox matches reality even if it was changed in System Settings.
+    private var launchAtLogin: Binding<Bool> {
+        Binding(get: { LaunchAtLogin.isEnabled },
+                set: { LaunchAtLogin.setEnabled($0) })
     }
 
     var body: some View {
@@ -231,6 +279,9 @@ struct PanelView: View {
                 .frame(width: 84)
             }
             HStack {
+                Toggle("Open at Login", isOn: launchAtLogin)
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
                 Spacer()
                 Button("Refresh") { monitor.refresh() }
                 Button("Quit") { NSApplication.shared.terminate(nil) }
