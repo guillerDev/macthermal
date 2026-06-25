@@ -69,48 +69,35 @@ struct SMCValue {
         var b = bytes
         return withUnsafeBytes(of: &b) { raw -> Double? in
             let p = raw.bindMemory(to: UInt8.self)
+            // Big-endian integer reads, each guarded by the key's declared size
+            // so a too-short key decodes to nil rather than reading padding.
+            func u16() -> UInt16? { size >= 2 ? UInt16(p[0]) << 8 | UInt16(p[1]) : nil }
             switch type {
             case "flt ":
                 guard size >= 4 else { return nil }
                 let bits = UInt32(p[0]) | UInt32(p[1]) << 8 | UInt32(p[2]) << 16 | UInt32(p[3]) << 24
                 return Double(Float(bitPattern: bits))
             case "ui8 ", "ui8":
-                return Double(p[0])
+                return size >= 1 ? Double(p[0]) : nil
             case "ui16":
-                return Double(UInt16(p[0]) << 8 | UInt16(p[1]))
+                return u16().map(Double.init)
             case "ui32":
+                guard size >= 4 else { return nil }
                 return Double(UInt32(p[0]) << 24 | UInt32(p[1]) << 16 | UInt32(p[2]) << 8 | UInt32(p[3]))
             case "si8 ", "si8":
-                return Double(Int8(bitPattern: p[0]))
+                return size >= 1 ? Double(Int8(bitPattern: p[0])) : nil
             case "si16":
-                return Double(Int16(bitPattern: UInt16(p[0]) << 8 | UInt16(p[1])))
-            case "sp78":
-                let v = Int16(bitPattern: UInt16(p[0]) << 8 | UInt16(p[1]))
-                return Double(v) / 256.0
-            case "fpe2":
-                let v = UInt16(p[0]) << 8 | UInt16(p[1])
-                return Double(v) / 4.0
-            case "fp2e":
-                let v = UInt16(p[0]) << 8 | UInt16(p[1])
-                return Double(v) / 16384.0
-            case "fp1f":
-                let v = UInt16(p[0]) << 8 | UInt16(p[1])
-                return Double(v) / 32768.0
-            case "fp4c":
-                let v = UInt16(p[0]) << 8 | UInt16(p[1])
-                return Double(v) / 4096.0
-            case "fp5b":
-                let v = UInt16(p[0]) << 8 | UInt16(p[1])
-                return Double(v) / 2048.0
-            case "fp6a":
-                let v = UInt16(p[0]) << 8 | UInt16(p[1])
-                return Double(v) / 1024.0
-            case "fp79":
-                let v = UInt16(p[0]) << 8 | UInt16(p[1])
-                return Double(v) / 512.0
-            case "fp88":
-                let v = UInt16(p[0]) << 8 | UInt16(p[1])
-                return Double(v) / 256.0
+                return u16().map { Double(Int16(bitPattern: $0)) }
+            // Signed/unsigned fixed-point: a big-endian u16 over a power-of-two divisor.
+            case "sp78": return u16().map { Double(Int16(bitPattern: $0)) / 256.0 }
+            case "fpe2": return u16().map { Double($0) / 4.0 }
+            case "fp2e": return u16().map { Double($0) / 16384.0 }
+            case "fp1f": return u16().map { Double($0) / 32768.0 }
+            case "fp4c": return u16().map { Double($0) / 4096.0 }
+            case "fp5b": return u16().map { Double($0) / 2048.0 }
+            case "fp6a": return u16().map { Double($0) / 1024.0 }
+            case "fp79": return u16().map { Double($0) / 512.0 }
+            case "fp88": return u16().map { Double($0) / 256.0 }
             default:
                 return nil
             }
@@ -230,6 +217,11 @@ final class SMC {
     /// The subset of keys that are temperature sensors: a `T…` key whose type
     /// is one of the temperature encodings. Fixed per machine, so it is
     /// computed once; repeat captures then read only these keys' live values.
+    // NOTE: this accepts only the two encodings real machines use for
+    // temperatures — `flt ` (Apple Silicon) and `sp78` (Intel). `SMCValue.double`
+    // can decode many more fixed-point formats, so if a `T…` sensor ever shipped
+    // in another encoding it would be silently dropped here despite being
+    // readable; widen this filter (not the decoder) if that ever happens.
     func temperatureKeys() throws -> [String] {
         if let tempKeyCache { return tempKeyCache }
         var keys: [String] = []

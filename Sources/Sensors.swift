@@ -53,6 +53,12 @@ func label(for key: String) -> String { knownLabels[key] ?? key }
 
 struct TempReading { let key: String; let label: String; let category: Category; let celsius: Double }
 
+extension Array where Element == TempReading {
+    /// Mean temperature across the readings (0 when empty). Shared so the CLI,
+    /// GUI, and JSON report can't drift on how the average is computed.
+    var averageCelsius: Double { isEmpty ? 0 : map { $0.celsius }.reduce(0, +) / Double(count) }
+}
+
 struct FanReading {
     let index: Int
     let rpm: Double
@@ -140,7 +146,7 @@ struct Snapshot {
     let thermal: ThermalState
 
     var hottest: TempReading? { temps.first }   // collectTemps returns hottest-first
-    var averageC: Double { temps.isEmpty ? 0 : temps.map { $0.celsius }.reduce(0, +) / Double(temps.count) }
+    var averageC: Double { temps.averageCelsius }
     func group(_ c: Category) -> [TempReading] { temps.filter { $0.category == c } }
 
     static func capture(_ smc: SMC) -> Snapshot {

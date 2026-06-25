@@ -48,6 +48,7 @@ final class ThermalMonitor: ObservableObject {
     let interval: TimeInterval = 3
     private let reader = SMCReader()
     private var timer: Timer?
+    private var refreshing = false
 
     init() {
         Task {
@@ -60,7 +61,12 @@ final class ThermalMonitor: ObservableObject {
     }
 
     func refresh() {
+        // Skip if a capture is still in flight, so a slow read can't let timer
+        // ticks pile up overlapping tasks.
+        guard !refreshing else { return }
+        refreshing = true
         Task {
+            defer { refreshing = false }
             guard let snap = await reader.capture() else { return }
             temps = snap.temps
             fans = snap.fans
@@ -69,7 +75,7 @@ final class ThermalMonitor: ObservableObject {
     }
 
     var hottest: TempReading? { temps.first }
-    var averageC: Double { temps.isEmpty ? 0 : temps.map { $0.celsius }.reduce(0, +) / Double(temps.count) }
+    var averageC: Double { temps.averageCelsius }
     func group(_ c: Category) -> [TempReading] { temps.filter { $0.category == c } }
 
     var menuBarText: String {

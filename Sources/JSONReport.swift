@@ -47,7 +47,7 @@ private func round2(_ v: Double) -> Double { (v * 100).rounded() / 100 }
 /// so it can be unit-tested without going through JSON serialization).
 func buildReport(temps: [TempReading], fans: [FanReading]) -> JSONReport {
     let hottest = temps.map { $0.celsius }.max() ?? 0
-    let avg = temps.isEmpty ? 0 : temps.map { $0.celsius }.reduce(0, +) / Double(temps.count)
+    let avg = temps.averageCelsius
 
     return JSONReport(
         summary: .init(
