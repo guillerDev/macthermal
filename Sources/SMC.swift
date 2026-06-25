@@ -153,6 +153,11 @@ final class SMC {
     private var keyListCache: [String]?
     private var keyInfoCache: [String: (type: String, size: UInt32)] = [:]
     private var tempKeyCache: [String]?
+    // Fan count and per-fan min/max RPM are hardware limits — fixed at runtime,
+    // so they are read once and cached too. Only the live RPM (`Ac`) and target
+    // (`Tg`) are re-read each capture.
+    private var fanCountCache: Int?
+    private var fanLimitsCache: [Int: (min: Double, max: Double)] = [:]
 
     init() throws {
         let service = IOServiceGetMatchingService(
@@ -179,10 +184,12 @@ final class SMC {
         return output
     }
 
-    /// Number of keys the SMC exposes (read via the "#KEY" meta key).
+    /// Number of keys the SMC exposes (read via the "#KEY" meta key). Clamped
+    /// to a sane range so a corrupt/garbage count can't blow up the enumeration
+    /// (huge `reserveCapacity`, millions of IOKit calls, or an `Int(_:)` trap).
     func keyCount() throws -> UInt32 {
-        let v = try read("#KEY")
-        return UInt32(v.double ?? 0)
+        let raw = try read("#KEY").double ?? 0
+        return UInt32(clampedCount(raw, upperBound: 8192))
     }
 
     /// Returns the FourCharCode key name at a given enumeration index.
@@ -252,6 +259,29 @@ final class SMC {
         }
         tempKeyCache = keys
         return keys
+    }
+
+    /// Number of fans (`FNum`), clamped and cached. Bounds a corrupt count the
+    /// same way `keyCount()` does. Caches only on a successful read+decode so a
+    /// transient failure doesn't permanently pin the count to 0.
+    func fanCount() -> Int {
+        if let fanCountCache { return fanCountCache }
+        guard let raw = (try? read("FNum"))?.double else { return 0 }
+        let n = clampedCount(raw, upperBound: 64)
+        fanCountCache = n
+        return n
+    }
+
+    /// Static min/max RPM limits for fan `i` (hardware-fixed; cached). Caches
+    /// only when both limits decode, so a failed first attempt can be retried
+    /// instead of masking the metadata for the connection's lifetime.
+    func fanLimits(_ i: Int) -> (min: Double, max: Double) {
+        if let cached = fanLimitsCache[i] { return cached }
+        guard let mn = (try? read("F\(i)Mn"))?.double,
+              let mx = (try? read("F\(i)Mx"))?.double else { return (0, 0) }
+        let limits = (min: mn, max: mx)
+        fanLimitsCache[i] = limits
+        return limits
     }
 }
 

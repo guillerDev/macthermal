@@ -48,6 +48,20 @@ struct Tests {
         eq(value("si8 ", [0xFF]).double, -1.0, "si8 0xFF = -1")
         expect(value("zzzz", [0x00]).double == nil, "unknown type decodes to nil")
 
+        // --- size guards: a too-short value decodes to nil, not garbage ---
+        expect(value("flt ", [0x00, 0x00, 0x48]).double == nil, "flt with 3 bytes = nil")
+        expect(value("ui16", [0x01]).double == nil, "ui16 with 1 byte = nil")
+        expect(value("ui32", [0x01, 0x02, 0x03]).double == nil, "ui32 with 3 bytes = nil")
+        expect(value("sp78", [0x3D]).double == nil, "sp78 with 1 byte = nil")
+
+        // --- count clamping (SEC-1): untrusted SMC counts can't crash/blow up ---
+        expect(clampedCount(.nan, upperBound: 8192) == 0, "clampedCount(NaN) = 0")
+        expect(clampedCount(.infinity, upperBound: 8192) == 0, "clampedCount(∞) = 0")
+        expect(clampedCount(-5, upperBound: 8192) == 0, "clampedCount(negative) = 0")
+        expect(clampedCount(3, upperBound: 8192) == 3, "clampedCount(3) = 3")
+        expect(clampedCount(1e12, upperBound: 8192) == 8192, "clampedCount(huge) = upperBound")
+        expect(clampedCount(1e300, upperBound: 8192) == 8192, "clampedCount(> Int.max) = upperBound (no trap)")
+
         // --- temperature thresholds ---
         expect(tempLevel(59.9).label == "cool" && tempLevel(59.9).severity == .ok, "tempLevel < 60 = cool")
         expect(tempLevel(60).severity == .normal, "tempLevel 60 = normal")

@@ -110,7 +110,25 @@ struct ThermalState: Equatable {
     }
 }
 
+// MARK: - Helpers
+
+/// Clamps a raw count read from the SMC to a sane, non-negative integer range.
+/// Guards against NaN / ∞ / negative / absurdly-large values that would
+/// otherwise crash an `Int(_:)` conversion or blow up an allocation. Clamps as
+/// a Double *before* converting, since `Int(raw)` itself traps for finite
+/// values larger than Int.max.
+func clampedCount(_ raw: Double, upperBound: Int) -> Int {
+    guard raw.isFinite, raw >= 0 else { return 0 }
+    return Int(min(raw, Double(upperBound)))
+}
+
 // MARK: - Collection
+
+// Plausibility bounds (°C) for a temperature reading: a disconnected sensor
+// reads ~0, and no real on-die sensor sits at or above 130 °C, so anything
+// outside this open range is treated as spurious and dropped.
+private let minPlausibleCelsius = 1.0
+private let maxPlausibleCelsius = 130.0
 
 func collectTemps(_ smc: SMC) -> [TempReading] {
     var out: [TempReading] = []
@@ -119,21 +137,22 @@ func collectTemps(_ smc: SMC) -> [TempReading] {
     // and apply a plausibility range to drop spurious readings.
     let keys = (try? smc.temperatureKeys()) ?? []
     for key in keys {
-        guard let v = try? smc.read(key), let c = v.double, c > 1, c < 130 else { continue }
+        guard let v = try? smc.read(key), let c = v.double,
+              c > minPlausibleCelsius, c < maxPlausibleCelsius else { continue }
         out.append(TempReading(key: key, label: label(for: key), category: categorize(key), celsius: c))
     }
     return out.sorted { $0.celsius > $1.celsius }
 }
 
 func collectFans(_ smc: SMC) -> [FanReading] {
-    guard let countVal = try? smc.read("FNum"), let count = countVal.double else { return [] }
     var fans: [FanReading] = []
-    for i in 0..<Int(count) {
+    // Fan count and min/max RPM are cached (hardware-fixed); only the live RPM
+    // and target are re-read each capture.
+    for i in 0..<smc.fanCount() {
         let rpm = (try? smc.read("F\(i)Ac"))?.double ?? 0
-        let mn = (try? smc.read("F\(i)Mn"))?.double ?? 0
-        let mx = (try? smc.read("F\(i)Mx"))?.double ?? 0
         let tg = (try? smc.read("F\(i)Tg"))?.double ?? 0
-        fans.append(FanReading(index: i, rpm: rpm, min: mn, max: mx, target: tg))
+        let limits = smc.fanLimits(i)
+        fans.append(FanReading(index: i, rpm: rpm, min: limits.min, max: limits.max, target: tg))
     }
     return fans
 }
