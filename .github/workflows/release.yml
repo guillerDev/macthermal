@@ -36,6 +36,11 @@ jobs:
       - name: Package menu-bar app
         run: ditto -c -k --keepParent macthermal.app "macthermal-app-${TAG}.zip"
 
+      # The cask points at this zipped .app asset and pins it by hash.
+      - name: Compute app zip sha256
+        id: appsha
+        run: echo "value=$(shasum -a 256 "macthermal-app-${TAG}.zip" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
       # GitHub auto-generates the source tarball for the tag; its sha256 is what
       # the Homebrew formula needs. Compute it and surface it in the release notes.
       - name: Compute source tarball sha256
@@ -54,14 +59,19 @@ jobs:
           ### Install (Homebrew tap)
 
           ```sh
-          brew install ${{ github.repository_owner }}/tap/macthermal
+          brew install ${{ github.repository_owner }}/tap/macthermal          # CLI
+          brew install --cask ${{ github.repository_owner }}/tap/macthermal   # menu-bar app
           ```
 
-          ### Formula values for this release
+          ### Tap values for this release
 
           ```ruby
+          # Formula/macthermal.rb (CLI, source tarball)
           url "https://github.com/${{ github.repository }}/archive/refs/tags/${{ env.TAG }}.tar.gz"
           sha256 "${{ steps.sha.outputs.value }}"
+
+          # Casks/macthermal.rb (menu-bar app zip)
+          sha256 "${{ steps.appsha.outputs.value }}"
           ```
 
           The attached `macthermal-app-*.zip` is the ad-hoc-signed menu-bar app.
@@ -77,21 +87,31 @@ jobs:
             --title "${TAG}" \
             --notes-file notes.md
 
-      # Auto-bump the formula in <owner>/homebrew-tap so you never edit the
-      # sha256 by hand. Runs only when the TAP_GITHUB_TOKEN secret is set; the
-      # default GITHUB_TOKEN can't push to a different repository.
-      - name: Bump formula in homebrew-tap
+      # Auto-bump the formula (CLI) and cask (menu-bar app) in <owner>/homebrew-tap
+      # so you never edit a sha256 by hand. Runs only when the TAP_GITHUB_TOKEN
+      # secret is set; the default GITHUB_TOKEN can't push to a different repository.
+      - name: Bump formula & cask in homebrew-tap
         if: ${{ env.TAP_TOKEN != '' }}
         run: |
+          VERSION="${TAG#v}"
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/${GITHUB_REPOSITORY_OWNER}/homebrew-tap.git" tap
           cd tap
-          # BSD sed (macOS runner): rewrite only the url + sha256 lines, keep indent.
+          # BSD sed (macOS runner): rewrite only the targeted lines, keep indent.
+          # CLI formula: url (new tag) + sha256 (source tarball).
           sed -E -i '' \
             -e "s|^( *)url \".*\"|\1url \"https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz\"|" \
             -e "s|^( *)sha256 \".*\"|\1sha256 \"${{ steps.sha.outputs.value }}\"|" \
             Formula/macthermal.rb
+          # Menu-bar app cask (if present): version + sha256 (app zip). The cask's
+          # url is derived from `version`, so only these two lines change.
+          if [ -f Casks/macthermal.rb ]; then
+            sed -E -i '' \
+              -e "s|^( *)version \".*\"|\1version \"${VERSION}\"|" \
+              -e "s|^( *)sha256 \".*\"|\1sha256 \"${{ steps.appsha.outputs.value }}\"|" \
+              Casks/macthermal.rb
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/macthermal.rb
-          git commit -m "macthermal ${TAG}" || { echo "formula already up to date"; exit 0; }
+          git add -A
+          git commit -m "macthermal ${TAG}" || { echo "tap already up to date"; exit 0; }
           git push
