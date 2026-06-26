@@ -4,6 +4,13 @@ APP       := macthermal.app
 TEST_BIN  := .macthermal-tests
 PREFIX    ?= /usr/local
 
+# Build for macOS 13+ regardless of the build SDK, so a newer-SDK release build
+# (e.g. macos-26 → Tahoe SwiftUI styling) still launches on macOS 13. The
+# explicit -target is required: swiftc ignores MACOSX_DEPLOYMENT_TARGET and
+# otherwise defaults min-OS to the SDK version, silently raising the requirement.
+ARCH   := $(shell uname -m)
+DEPLOY := -target $(ARCH)-apple-macos13.0
+
 SHARED   := Sources/SMC.swift Sources/Sensors.swift
 REPORT   := Sources/JSONReport.swift
 CLI_SRC  := $(SHARED) $(REPORT) Sources/main.swift
@@ -18,7 +25,7 @@ all: build
 build: $(BIN)
 
 $(BIN): $(CLI_SRC)
-	swiftc -O -framework IOKit -o $(BIN) $(CLI_SRC)
+	swiftc -O $(DEPLOY) -framework IOKit -o $(BIN) $(CLI_SRC)
 
 run: build
 	./$(BIN)
@@ -35,7 +42,7 @@ test: $(TEST_SRC)
 gui: $(APP)
 
 $(APP): $(GUI_SRC) Resources/Info.plist Resources/AppIcon.icns
-	swiftc -O -parse-as-library -framework IOKit -framework SwiftUI -framework AppKit \
+	swiftc -O $(DEPLOY) -parse-as-library -framework IOKit -framework SwiftUI -framework AppKit \
 		-framework ServiceManagement \
 		-o $(GUI_BIN) $(GUI_SRC)
 	rm -rf $(APP)
