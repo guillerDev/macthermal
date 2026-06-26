@@ -11,6 +11,25 @@ Works on both **Apple Silicon** (M-series, hundreds of on-die sensors) and
 > Contributing or using an AI assistant on this repo? See [AGENTS.md](AGENTS.md)
 > for build/test commands, architecture, and the non-obvious gotchas.
 
+## Install
+
+Via the Homebrew tap:
+
+```sh
+brew install guillerDev/tap/macthermal            # CLI
+brew install --cask guillerDev/tap/macthermal     # menu-bar app
+```
+
+The menu-bar app is ad-hoc signed (not notarized), so on first launch macOS
+Gatekeeper will block it. Approve it once by right-clicking the app in Finder
+and choosing **Open**, or run:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/macthermal.app"
+```
+
+Prefer building from source? See **[Build](#build)** below.
+
 ## Build
 
 ```sh
