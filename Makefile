@@ -10,7 +10,7 @@ CLI_SRC  := $(SHARED) $(REPORT) Sources/main.swift
 GUI_SRC  := $(SHARED) Sources/gui/MenuBarApp.swift
 TEST_SRC := $(SHARED) $(REPORT) Tests/Tests.swift
 
-.PHONY: all build run watch test gui open clean install uninstall
+.PHONY: all build run watch test gui icon open clean install uninstall
 
 all: build
 
@@ -34,16 +34,21 @@ test: $(TEST_SRC)
 # ---- Menu-bar GUI (.app bundle) ----
 gui: $(APP)
 
-$(APP): $(GUI_SRC) Resources/Info.plist
+$(APP): $(GUI_SRC) Resources/Info.plist Resources/AppIcon.icns
 	swiftc -O -parse-as-library -framework IOKit -framework SwiftUI -framework AppKit \
 		-framework ServiceManagement \
 		-o $(GUI_BIN) $(GUI_SRC)
 	rm -rf $(APP)
-	mkdir -p $(APP)/Contents/MacOS
+	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
 	cp Resources/Info.plist $(APP)/Contents/Info.plist
+	cp Resources/AppIcon.icns $(APP)/Contents/Resources/AppIcon.icns
 	mv $(GUI_BIN) $(APP)/Contents/MacOS/$(GUI_BIN)
 	codesign --force --sign - $(APP) >/dev/null 2>&1 || true
 	@echo "built $(APP) — launch with: open $(APP)  (or: make open)"
+
+# Regenerate the app icon from the SF Symbols thermometer (commits Resources/AppIcon.icns).
+icon:
+	./scripts/make-icon.sh
 
 open: gui
 	open $(APP)

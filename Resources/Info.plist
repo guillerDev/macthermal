@@ -16,6 +16,10 @@
     <string>APPL</string>
     <key>CFBundleExecutable</key>
     <string>macthermal-gui</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <!-- Menu-bar-only agent: no Dock icon, no main window. -->

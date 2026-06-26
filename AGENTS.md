@@ -43,7 +43,9 @@ and needs no hardware.
 | `Sources/main.swift` | CLI only: arg parsing, ANSI `Palette`, text rendering, entry point. Has top-level code, so it's named `main.swift`. |
 | `Sources/gui/MenuBarApp.swift` | GUI only: `SMCReader` actor, `ThermalMonitor` (`@MainActor` `ObservableObject`), SwiftUI views, `@main`. |
 | `Tests/Tests.swift` | Standalone test runner (`@main`), no XCTest. |
-| `Resources/Info.plist` | App bundle plist (`LSUIElement`, bundle id, exec name). |
+| `Resources/Info.plist` | App bundle plist (`LSUIElement`, bundle id, exec name, `CFBundleIconFile`). |
+| `Resources/AppIcon.icns` | App icon (committed). Regenerate with `make icon`. |
+| `scripts/AppIconGen.swift`, `scripts/make-icon.sh` | Generate `AppIcon.icns` from the SF Symbols thermometer; only needed when changing the icon. |
 
 The three build targets are just different file sets over the shared core —
 see `Makefile`: `SHARED`, `CLI_SRC`, `GUI_SRC`, `TEST_SRC`.
