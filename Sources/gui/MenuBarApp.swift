@@ -193,7 +193,9 @@ struct MacThermalApp: App {
         MenuBarExtra {
             PanelView(monitor: monitor)
         } label: {
-            // Menu-bar title: thermometer + hottest temp.
+            // Menu-bar title: a fixed, untinted thermometer + hottest temp, so the
+            // item keeps the standard monochrome menu-bar style and sits cleanly
+            // alongside other items. (Heat color lives in the panel instead.)
             Image(systemName: "thermometer.medium")
             Text(monitor.menuBarText)
         }
@@ -241,7 +243,11 @@ struct PanelView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Image(systemName: "thermometer.sun.fill")
+            // Same thermometer glyph as the menu bar, tinted by severity here
+            // (in-panel color is fine; it doesn't affect menu-bar alignment).
+            Image(systemName: "thermometer.medium")
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(monitor.menuBarSeverity.color)
             Text("macthermal").font(.headline)
             Spacer()
             Circle().fill(monitor.thermal.severity.color).frame(width: 8, height: 8)
