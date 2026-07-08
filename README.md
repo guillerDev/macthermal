@@ -42,6 +42,11 @@ make install    # copy the CLI to /usr/local/bin (PREFIX=... to change)
 
 Requires the Xcode command-line tools (`xcode-select --install`).
 
+You can also build the CLI/tests with SwiftPM (`swift build`, `swift run
+macthermal`) or open `Package.swift` in Xcode. The menu-bar `.app` is built only
+by `make gui`. See **[docs/BUILDING.md](docs/BUILDING.md)** for all three build
+paths and when to use each.
+
 ## Usage
 
 ```sh

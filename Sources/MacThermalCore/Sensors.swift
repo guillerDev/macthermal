@@ -5,7 +5,7 @@ import Foundation
 // A UI-agnostic health level. The CLI maps it to ANSI colors; the GUI maps it
 // to SwiftUI colors. Neither concern leaks into the sensor layer.
 
-enum Severity {
+public enum Severity {
     case ok, normal, warn, hot, critical
 }
 
@@ -24,7 +24,7 @@ let knownLabels: [String: String] = [
     "Tm0P": "Memory", "TPCD": "PCH",
 ]
 
-enum Category: String, CaseIterable, Hashable {
+public enum Category: String, CaseIterable, Hashable {
     case cpu = "CPU"
     case gpu = "GPU"
     case memory = "Memory"
@@ -33,7 +33,7 @@ enum Category: String, CaseIterable, Hashable {
     case other = "Other"
 }
 
-func categorize(_ key: String) -> Category {
+public func categorize(_ key: String) -> Category {
     let p = key.prefix(2)
     switch p {
     case "Tp", "Te", "TC", "Tc": return .cpu      // performance / efficiency cores, CPU
@@ -51,26 +51,37 @@ func label(for key: String) -> String { knownLabels[key] ?? key }
 
 // MARK: - Data model
 
-struct TempReading: Equatable { let key: String; let label: String; let category: Category; let celsius: Double }
+public struct TempReading: Equatable {
+    public let key: String
+    public let label: String
+    public let category: Category
+    public let celsius: Double
+    public init(key: String, label: String, category: Category, celsius: Double) {
+        self.key = key; self.label = label; self.category = category; self.celsius = celsius
+    }
+}
 
 extension Array where Element == TempReading {
     /// Mean temperature across the readings (0 when empty). Shared so the CLI,
     /// GUI, and JSON report can't drift on how the average is computed.
-    var averageCelsius: Double { isEmpty ? 0 : map { $0.celsius }.reduce(0, +) / Double(count) }
+    public var averageCelsius: Double { isEmpty ? 0 : map { $0.celsius }.reduce(0, +) / Double(count) }
 }
 
-struct FanReading: Equatable {
-    let index: Int
-    let rpm: Double
-    let min: Double
-    let max: Double
-    let target: Double
-    var utilization: Double { max > min ? Swift.max(0, Swift.min(100, (rpm - min) / (max - min) * 100)) : 0 }
+public struct FanReading: Equatable {
+    public let index: Int
+    public let rpm: Double
+    public let min: Double
+    public let max: Double
+    public let target: Double
+    public var utilization: Double { max > min ? Swift.max(0, Swift.min(100, (rpm - min) / (max - min) * 100)) : 0 }
+    public init(index: Int, rpm: Double, min: Double, max: Double, target: Double) {
+        self.index = index; self.rpm = rpm; self.min = min; self.max = max; self.target = target
+    }
 }
 
 // MARK: - Levels (thresholds, shared by CLI + GUI)
 
-func tempLevel(_ c: Double) -> (label: String, severity: Severity) {
+public func tempLevel(_ c: Double) -> (label: String, severity: Severity) {
     switch c {
     case ..<60:  return ("cool", .ok)
     case ..<78:  return ("normal", .normal)
@@ -80,7 +91,7 @@ func tempLevel(_ c: Double) -> (label: String, severity: Severity) {
     }
 }
 
-func fanLevel(_ u: Double) -> (label: String, severity: Severity) {
+public func fanLevel(_ u: Double) -> (label: String, severity: Severity) {
     switch u {
     case ..<5:  return ("idle", .ok)
     case ..<50: return ("low", .ok)
@@ -94,12 +105,12 @@ func fanLevel(_ u: Double) -> (label: String, severity: Severity) {
 // The Apple Silicon-supported equivalent of the legacy Intel `pmset -g therm`
 // thermal levels (which report "unsupported on this machine" on M-series).
 
-struct ThermalState: Equatable {
-    let name: String
-    let note: String
-    let severity: Severity
+public struct ThermalState: Equatable {
+    public let name: String
+    public let note: String
+    public let severity: Severity
 
-    static func current() -> ThermalState {
+    public static func current() -> ThermalState {
         switch ProcessInfo.processInfo.thermalState {
         case .nominal:  return .init(name: "nominal",  note: "no thermal pressure", severity: .ok)
         case .fair:     return .init(name: "fair",     note: "slightly elevated; fans ramping", severity: .normal)
@@ -117,7 +128,7 @@ struct ThermalState: Equatable {
 /// otherwise crash an `Int(_:)` conversion or blow up an allocation. Clamps as
 /// a Double *before* converting, since `Int(raw)` itself traps for finite
 /// values larger than Int.max.
-func clampedCount(_ raw: Double, upperBound: Int) -> Int {
+public func clampedCount(_ raw: Double, upperBound: Int) -> Int {
     guard raw.isFinite, raw >= 0 else { return 0 }
     return Int(min(raw, Double(upperBound)))
 }
@@ -130,7 +141,7 @@ func clampedCount(_ raw: Double, upperBound: Int) -> Int {
 private let minPlausibleCelsius = 1.0
 private let maxPlausibleCelsius = 130.0
 
-func collectTemps(_ smc: SMC) -> [TempReading] {
+public func collectTemps(_ smc: SMC) -> [TempReading] {
     var out: [TempReading] = []
     // `temperatureKeys()` has already filtered to `T…` keys of a temperature
     // type (and caches that set), so here we only read each one's live value
@@ -144,7 +155,7 @@ func collectTemps(_ smc: SMC) -> [TempReading] {
     return out.sorted { $0.celsius > $1.celsius }
 }
 
-func collectFans(_ smc: SMC) -> [FanReading] {
+public func collectFans(_ smc: SMC) -> [FanReading] {
     var fans: [FanReading] = []
     // Fan count and min/max RPM are cached (hardware-fixed); only the live RPM
     // and target are re-read each capture.
@@ -159,16 +170,16 @@ func collectFans(_ smc: SMC) -> [FanReading] {
 
 // MARK: - Snapshot (aggregate convenience for UIs)
 
-struct Snapshot {
-    let temps: [TempReading]
-    let fans: [FanReading]
-    let thermal: ThermalState
+public struct Snapshot {
+    public let temps: [TempReading]
+    public let fans: [FanReading]
+    public let thermal: ThermalState
 
-    var hottest: TempReading? { temps.first }   // collectTemps returns hottest-first
-    var averageC: Double { temps.averageCelsius }
-    func group(_ c: Category) -> [TempReading] { temps.filter { $0.category == c } }
+    public var hottest: TempReading? { temps.first }   // collectTemps returns hottest-first
+    public var averageC: Double { temps.averageCelsius }
+    public func group(_ c: Category) -> [TempReading] { temps.filter { $0.category == c } }
 
-    static func capture(_ smc: SMC) -> Snapshot {
+    public static func capture(_ smc: SMC) -> Snapshot {
         Snapshot(temps: collectTemps(smc), fans: collectFans(smc), thermal: .current())
     }
 }

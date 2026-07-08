@@ -1,4 +1,10 @@
 import Foundation
+// The shared core is its own module under SwiftPM/Xcode. The flat `swiftc`
+// Makefile build compiles every file into one module, where this import target
+// doesn't exist — `canImport` is false there, so the guard compiles it away.
+#if canImport(MacThermalCore)
+import MacThermalCore
+#endif
 
 // MARK: - CLI options
 
@@ -131,7 +137,9 @@ func renderHuman(temps: [TempReading], fans: [FanReading], opts: Options) -> Str
 }
 
 func barGraph(_ pct: Double, width: Int, palette p: Palette) -> String {
-    let filled = Int((pct / 100.0 * Double(width)).rounded())
+    // Clamp to [0, width]: callers pass clamped utilization today, but an
+    // out-of-range pct would otherwise trap in `String(repeating:count:)`.
+    let filled = min(max(0, Int((pct / 100.0 * Double(width)).rounded())), width)
     let bar = String(repeating: "█", count: filled) + String(repeating: "·", count: width - filled)
     let colored: String
     switch pct {

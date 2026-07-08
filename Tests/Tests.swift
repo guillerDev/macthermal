@@ -1,4 +1,10 @@
 import Foundation
+// Under SwiftPM/Xcode the core is a separate module; the flat `swiftc` test
+// build compiles core + tests as one module, where this import doesn't resolve
+// (and `canImport` is false, so the guard removes it).
+#if canImport(MacThermalCore)
+import MacThermalCore
+#endif
 
 // Lightweight, dependency-free test runner for macthermal's pure logic — no SMC
 // hardware or live IOKit connection is required. Build and run with `make test`;
@@ -89,6 +95,12 @@ struct Tests {
         expect(categorize("TB0T") == .battery, "TB0T = battery")
         expect(categorize("Tm0P") == .memory, "Tm0P = memory")
         expect(categorize("TVD0") == .other, "TVD0 (undocumented SoC rail) = other")
+
+        // --- FourCharCode helpers (round-trip + short-key space padding) ---
+        expect(fourCharString(fourCharCode("TC0P")) == "TC0P", "fourChar round-trips a full 4-char key")
+        expect(fourCharCode("TC0P") == 0x54_43_30_50, "fourCharCode packs big-endian ASCII")
+        expect(fourCharString(fourCharCode("FNum")) == "FNum", "fourChar round-trips FNum")
+        expect(fourCharString(fourCharCode("F0")) == "F0  ", "fourCharCode space-pads a short key to 4 bytes")
 
         // --- JSON encoding (round-trips into the expected shape) ---
         let temps = [TempReading(key: "TC0P", label: "CPU proximity", category: .cpu, celsius: 65.789)]

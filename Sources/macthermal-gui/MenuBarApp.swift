@@ -1,6 +1,17 @@
 import SwiftUI
 import AppKit
 import ServiceManagement
+// Shared sensor core: a real module under SwiftPM/Xcode, but folded into a
+// single module by the flat `swiftc` Makefile build (where `canImport` is false
+// and this guard drops the import).
+#if canImport(MacThermalCore)
+import MacThermalCore
+// When the core is a separate module, `import AppKit` also pulls in the ObjC
+// `Category` typedef (objc/runtime.h), making bare `Category` ambiguous. Pin it
+// to ours. (In the flat Makefile build our same-module `Category` already wins,
+// and this guarded alias isn't compiled.)
+typealias Category = MacThermalCore.Category
+#endif
 
 // MARK: - Temperature unit (GUI display only)
 //
@@ -208,8 +219,19 @@ struct MacThermalApp: App {
 struct PanelView: View {
     @ObservedObject var monitor: ThermalMonitor
 
-    private var categoriesWithData: [Category] {
-        Category.allCases.filter { !monitor.group($0).isEmpty }
+    /// Temps grouped by category, in `Category.allCases` order, with empty
+    /// groups dropped. Computed once per render (a single pass over `temps`
+    /// instead of re-filtering per category), and — because empties are
+    /// dropped here — every group is non-empty, which is what lets the row
+    /// body force-unwrap `readings.first`. `Dictionary(grouping:)` preserves
+    /// input order, so `temps` being hottest-first means `readings.first` is
+    /// still the hottest sensor in the category.
+    private var temperatureGroups: [(category: Category, readings: [TempReading])] {
+        let byCategory = Dictionary(grouping: monitor.temps, by: \.category)
+        return Category.allCases.compactMap { cat in
+            guard let readings = byCategory[cat], !readings.isEmpty else { return nil }
+            return (cat, readings)
+        }
     }
 
     /// Bound to the monitor's cached flag so the checkbox flips instantly; the
@@ -251,24 +273,25 @@ struct PanelView: View {
             Text("macthermal").font(.headline)
             Spacer()
             Circle().fill(monitor.thermal.severity.color).frame(width: 8, height: 8)
+                .accessibilityHidden(true)   // decorative; `thermal.name` beside it carries the info
             Text(monitor.thermal.name).font(.caption).foregroundStyle(.secondary)
         }
     }
 
     private var temperatures: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(categoriesWithData, id: \.self) { cat in
-                let group = monitor.group(cat)
-                let hot = group.first!
+            ForEach(temperatureGroups, id: \.category) { group in
+                let hot = group.readings.first!   // safe: temperatureGroups drops empty groups
                 let lvl = tempLevel(hot.celsius)
                 HStack {
-                    Text(cat.rawValue).frame(width: 64, alignment: .leading)
+                    Text(group.category.rawValue).frame(width: 64, alignment: .leading)
                     Text(monitor.unit.format(hot.celsius))
                         .bold().foregroundStyle(lvl.severity.color)
                     Spacer()
-                    Text("\(group.count) sensors · \(lvl.label)")
+                    Text("\(group.readings.count) sensors · \(lvl.label)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                .accessibilityElement(children: .combine)
             }
         }
     }
@@ -290,6 +313,7 @@ struct PanelView: View {
                             .frame(width: 70)
                         Text(lvl.label).font(.caption).foregroundStyle(.secondary)
                     }
+                    .accessibilityElement(children: .combine)
                 }
             }
         }
@@ -303,7 +327,7 @@ struct PanelView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Picker("", selection: $monitor.unit) {
+                Picker("Temperature unit", selection: $monitor.unit) {
                     ForEach(TempUnit.allCases) { u in Text(u.symbol).tag(u) }
                 }
                 .pickerStyle(.segmented)

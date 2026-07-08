@@ -11,5 +11,10 @@
 *.swiftmodule
 .build/
 
+# SwiftPM / Xcode local state (Package.swift is committed; these aren't)
+.swiftpm/
+Package.resolved
+*.xcodeproj
+
 # macOS
 .DS_Store

@@ -66,7 +66,7 @@ func buildReport(temps: [TempReading], fans: [FanReading]) -> JSONReport {
 }
 
 /// Serializes the report to a compact, deterministic JSON string.
-func renderJSON(temps: [TempReading], fans: [FanReading]) -> String {
+public func renderJSON(temps: [TempReading], fans: [FanReading]) -> String {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     guard let data = try? encoder.encode(buildReport(temps: temps, fans: fans)),

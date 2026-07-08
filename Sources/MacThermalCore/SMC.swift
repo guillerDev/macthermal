@@ -13,7 +13,7 @@ private let SMC_CMD_READ_KEYINFO: UInt8 = 9
 private let SMC_CMD_READ_INDEX: UInt8 = 8
 
 /// 32-byte payload buffer, imported to match the C `SMCBytes_t` tuple ABI.
-typealias SMCBytes = (
+public typealias SMCBytes = (
     UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
     UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
     UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
@@ -57,15 +57,19 @@ private struct SMCParamStruct {
 }
 
 /// A decoded value read from a single SMC key.
-struct SMCValue {
+public struct SMCValue {
     let key: String
     let type: String
     let size: UInt32
     let bytes: SMCBytes
 
+    public init(key: String, type: String, size: UInt32, bytes: SMCBytes) {
+        self.key = key; self.type = type; self.size = size; self.bytes = bytes
+    }
+
     /// Interprets the raw bytes according to the SMC data-type code.
     /// Handles the float/fixed-point encodings used for temperature and fans.
-    var double: Double? {
+    public var double: Double? {
         var b = bytes
         return withUnsafeBytes(of: &b) { raw in
             SMCValue.decode(type: type, size: size, p: raw.bindMemory(to: UInt8.self))
@@ -142,7 +146,7 @@ enum SMCError: Error, CustomStringConvertible {
     }
 }
 
-final class SMC {
+public final class SMC {
     private var connection: io_connect_t = 0
 
     // Per-connection caches. The SMC key set, and each key's type/size, are
@@ -159,7 +163,7 @@ final class SMC {
     private var fanCountCache: Int?
     private var fanLimitsCache: [Int: (min: Double, max: Double)] = [:]
 
-    init() throws {
+    public init() throws {
         let service = IOServiceGetMatchingService(
             kIOMainPortDefault, IOServiceMatching("AppleSMC"))
         guard service != 0 else { throw SMCError.driverNotFound }
@@ -287,7 +291,7 @@ final class SMC {
 
 // MARK: - FourCharCode helpers
 
-func fourCharCode(_ s: String) -> UInt32 {
+public func fourCharCode(_ s: String) -> UInt32 {
     let chars = Array(s.utf8)
     var result: UInt32 = 0
     for i in 0..<4 {
@@ -297,7 +301,7 @@ func fourCharCode(_ s: String) -> UInt32 {
     return result
 }
 
-func fourCharString(_ code: UInt32) -> String {
+public func fourCharString(_ code: UInt32) -> String {
     let bytes = [
         UInt8((code >> 24) & 0xff),
         UInt8((code >> 16) & 0xff),

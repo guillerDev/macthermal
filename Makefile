@@ -11,10 +11,10 @@ PREFIX    ?= /usr/local
 ARCH   := $(shell uname -m)
 DEPLOY := -target $(ARCH)-apple-macos13.0
 
-SHARED   := Sources/SMC.swift Sources/Sensors.swift
-REPORT   := Sources/JSONReport.swift
-CLI_SRC  := $(SHARED) $(REPORT) Sources/main.swift
-GUI_SRC  := $(SHARED) Sources/gui/MenuBarApp.swift
+SHARED   := Sources/MacThermalCore/SMC.swift Sources/MacThermalCore/Sensors.swift
+REPORT   := Sources/MacThermalCore/JSONReport.swift
+CLI_SRC  := $(SHARED) $(REPORT) Sources/macthermal/main.swift
+GUI_SRC  := $(SHARED) Sources/macthermal-gui/MenuBarApp.swift
 TEST_SRC := $(SHARED) $(REPORT) Tests/Tests.swift
 
 .PHONY: all build run watch test gui icon open clean install uninstall

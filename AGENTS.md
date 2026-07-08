@@ -12,8 +12,13 @@ front-ends over one shared sensor core:
 - a **CLI** (`macthermal`) — summary, `--all`, `--json`, `--watch` dashboard;
 - a **menu-bar app** (`macthermal.app`) — SwiftUI `MenuBarExtra` agent.
 
-Pure Swift compiled with `swiftc` (no SwiftPM/Xcode project). Targets macOS 13+,
-Apple Silicon and Intel.
+Pure Swift. The **`Makefile` + `swiftc` is the source of truth** for builds,
+tests, releases, and Homebrew. A `Package.swift` is committed **only** as an
+editor/IDE convenience (open in Xcode, autocomplete, `swift build`/`swift run`,
+and to give SourceKit-LSP a whole-module view) — it does not drive releases and
+SwiftPM cannot produce the menu-bar `.app` bundle (that stays `make gui`). Both
+build systems compile the same files; see the dual-build gotcha below for how one
+source tree satisfies both. Targets macOS 13+, Apple Silicon and Intel.
 
 ## Build / test / run
 
@@ -33,16 +38,33 @@ timestamp-driven: a no-op build prints "Nothing to be done" — that's expected,
 not an error. **Always run `make test` after touching `Sources/`** — it's fast
 and needs no hardware.
 
+To work in Xcode, open `Package.swift` (**not** the folder — that gives a bare
+file browser) — no generated project. `swift build`, `swift run macthermal
+[args]`, and `swift run macthermalTests` all work. **The `.app` is not a SwiftPM
+product** — build/run the menu-bar app with `make gui` / `make open`. After
+changing `Sources/`, run **both** `make test` and `swift build` so neither build
+path silently breaks (they compile the same files differently — see the
+module-bridging gotcha).
+
+All three build paths (Makefile, SwiftPM, Xcode) are documented in
+[docs/BUILDING.md](docs/BUILDING.md), including a capability matrix and which to
+use when.
+
 ## Source layout
+
+Files are grouped into per-target directories so SwiftPM can model each build
+target as a module (SwiftPM forbids one file belonging to two targets). The
+Makefile just lists the files explicitly, so the layout suits both.
 
 | File | Role |
 |------|------|
-| `Sources/SMC.swift` | Low-level IOKit layer: the `SMC` class, `SMCValue` decoding, key enumeration + per-connection caches. The ABI-sensitive code. |
-| `Sources/Sensors.swift` | **Shared core, UI-agnostic.** Model (`TempReading`, `FanReading`, `ThermalState`, `Snapshot`), `Severity`, threshold functions (`tempLevel`/`fanLevel`), `categorize`, collection (`collectTemps`/`collectFans`). |
-| `Sources/JSONReport.swift` | `Codable`-based JSON encoder (`renderJSON`), shared by CLI and tests. |
-| `Sources/main.swift` | CLI only: arg parsing, ANSI `Palette`, text rendering, entry point. Has top-level code, so it's named `main.swift`. |
-| `Sources/gui/MenuBarApp.swift` | GUI only: `SMCReader` actor, `ThermalMonitor` (`@MainActor` `ObservableObject`), SwiftUI views, `@main`. |
+| `Sources/MacThermalCore/SMC.swift` | Low-level IOKit layer: the `SMC` class, `SMCValue` decoding, key enumeration + per-connection caches. The ABI-sensitive code. |
+| `Sources/MacThermalCore/Sensors.swift` | **Shared core, UI-agnostic.** Model (`TempReading`, `FanReading`, `ThermalState`, `Snapshot`), `Severity`, threshold functions (`tempLevel`/`fanLevel`), `categorize`, collection (`collectTemps`/`collectFans`). |
+| `Sources/MacThermalCore/JSONReport.swift` | `Codable`-based JSON encoder (`renderJSON`), shared by CLI and tests. |
+| `Sources/macthermal/main.swift` | CLI only: arg parsing, ANSI `Palette`, text rendering, entry point. Has top-level code, so it's named `main.swift`. |
+| `Sources/macthermal-gui/MenuBarApp.swift` | GUI only: `SMCReader` actor, `ThermalMonitor` (`@MainActor` `ObservableObject`), SwiftUI views, `@main`. |
 | `Tests/Tests.swift` | Standalone test runner (`@main`), no XCTest. |
+| `Package.swift` | SwiftPM manifest (editor/IDE convenience only — see "What this is"). Core is target `MacThermalCore`; `macthermal`, `macthermal-gui`, `macthermalTests` depend on it. |
 | `Resources/Info.plist` | App bundle plist (`LSUIElement`, bundle id, exec name, `CFBundleIconFile`). |
 | `Resources/AppIcon.icns` | App icon (committed). Regenerate with `make icon`. |
 | `scripts/AppIconGen.swift`, `scripts/make-icon.sh` | Generate `AppIcon.icns` from the SF Symbols thermometer; only needed when changing the icon. |
@@ -83,6 +105,20 @@ see `Makefile`: `SHARED`, `CLI_SRC`, `GUI_SRC`, `TEST_SRC`.
   in a plausible `1–130 °C` range (drops spurious/zero sensors).
 - **`categorize` is intentionally case-sensitive** — SMC key naming is
   (`Tp`=P-core, `Te`=E-core, `Tg`/`TG`=GPU, `TB`=battery, `Tm`/`TM`=memory).
+- **One source tree, two build systems (module bridging).** The flat `swiftc`
+  build compiles each target as **one module** (shared files recompiled in); SwiftPM
+  compiles the shared code as a separate **`MacThermalCore` module** the front-ends
+  import. To satisfy both, the core's cross-target API is `public`, and each entry
+  file (`main.swift`, `MenuBarApp.swift`, `Tests.swift`) imports the core behind
+  `#if canImport(MacThermalCore)` — false in the flat build (no such module, symbols
+  already in scope), true under SwiftPM/Xcode. Keep new cross-target symbols `public`
+  and this guard in place, or one of the two builds breaks.
+- **`Category` collides with AppKit's ObjC `Category` typedef under SwiftPM.** Once
+  the core is a separate module, `import AppKit` also pulls in `objc/runtime.h`'s
+  `Category`, so bare `Category` in `MenuBarApp.swift` is ambiguous (both imported).
+  A guarded `typealias Category = MacThermalCore.Category` pins it. The flat build
+  is unaffected (a same-module `Category` already wins over the import). If you add
+  another AppKit-importing file that names `Category`, it needs the same alias.
 - **`SMCValue.decode` is split into typed statements on purpose.** Keep the
   per-byte reads (`u16be`/`u32be`/`fltLE`) and the divisor lookup as separate,
   explicitly-typed steps. Collapsing them into one inline `|`/`<<` shift-chain or
