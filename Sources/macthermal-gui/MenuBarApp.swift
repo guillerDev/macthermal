@@ -62,6 +62,42 @@ actor SMCReader {
     }
 }
 
+// MARK: - Grouped temperatures (panel presentation model)
+
+/// One category's sensors, hottest-first. A value type with a stable `id` so the
+/// panel's `ForEach` can diff rows and skip unchanged ones. Constructed only for
+/// non-empty categories, so `hottest` is always present.
+struct TempGroup: Identifiable, Equatable {
+    let category: Category
+    let readings: [TempReading]
+    var id: Category { category }
+    var hottest: TempReading { readings[0] }
+    /// Mean across the category's sensors — same computation the CLI and JSON use.
+    var averageCelsius: Double { readings.averageCelsius }
+
+    /// Right-hand detail line. Includes the group average only when it adds
+    /// information — with a single sensor the average equals the hottest value
+    /// already shown, so it's omitted (and "sensor" is singular).
+    func detail(unit: TempUnit, level: String) -> String {
+        let n = readings.count
+        let sensors = "\(n) sensor\(n == 1 ? "" : "s")"
+        return n > 1
+            ? "avg \(unit.format(averageCelsius)) · \(sensors) · \(level)"
+            : "\(sensors) · \(level)"
+    }
+
+    /// Groups readings by category in `Category.allCases` order, dropping empties.
+    /// `Dictionary(grouping:)` preserves input order, so hottest-first `temps`
+    /// keeps each group's `readings.first` the hottest sensor in that category.
+    static func grouped(_ temps: [TempReading]) -> [TempGroup] {
+        let byCategory = Dictionary(grouping: temps, by: \.category)
+        return Category.allCases.compactMap { cat in
+            guard let readings = byCategory[cat], !readings.isEmpty else { return nil }
+            return TempGroup(category: cat, readings: readings)
+        }
+    }
+}
+
 // MARK: - Monitor
 //
 // Polls the reader on a timer and republishes snapshots to SwiftUI on the main
@@ -69,7 +105,13 @@ actor SMCReader {
 
 @MainActor
 final class ThermalMonitor: ObservableObject {
-    @Published var temps: [TempReading] = []
+    /// Live readings, hottest-first. Grouped-by-category is derived state the
+    /// panel renders, so it's cached here (recomputed only when `temps` actually
+    /// changes) rather than re-grouped on every view `body` pass.
+    @Published var temps: [TempReading] = [] {
+        didSet { temperatureGroups = TempGroup.grouped(temps) }
+    }
+    @Published private(set) var temperatureGroups: [TempGroup] = []
     @Published var fans: [FanReading] = []
     @Published var thermal = ThermalState.current()
     @Published var available = true
@@ -142,7 +184,6 @@ final class ThermalMonitor: ObservableObject {
 
     var hottest: TempReading? { temps.first }
     var averageC: Double { temps.averageCelsius }
-    func group(_ c: Category) -> [TempReading] { temps.filter { $0.category == c } }
 
     var menuBarText: String {
         guard let h = hottest else { return "––" }
@@ -216,23 +257,110 @@ struct MacThermalApp: App {
 
 // MARK: - Dropdown panel
 
+// A thin composer: it owns the panel's outer container and hands each section
+// the narrow inputs it renders, so a change to one (e.g. fans) doesn't
+// re-evaluate the bodies of the others (header, temperatures, footer).
 struct PanelView: View {
     @ObservedObject var monitor: ThermalMonitor
 
-    /// Temps grouped by category, in `Category.allCases` order, with empty
-    /// groups dropped. Computed once per render (a single pass over `temps`
-    /// instead of re-filtering per category), and — because empties are
-    /// dropped here — every group is non-empty, which is what lets the row
-    /// body force-unwrap `readings.first`. `Dictionary(grouping:)` preserves
-    /// input order, so `temps` being hottest-first means `readings.first` is
-    /// still the hottest sensor in the category.
-    private var temperatureGroups: [(category: Category, readings: [TempReading])] {
-        let byCategory = Dictionary(grouping: monitor.temps, by: \.category)
-        return Category.allCases.compactMap { cat in
-            guard let readings = byCategory[cat], !readings.isEmpty else { return nil }
-            return (cat, readings)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            PanelHeader(severity: monitor.menuBarSeverity, thermal: monitor.thermal)
+            Divider()
+
+            if monitor.available {
+                TemperatureSection(groups: monitor.temperatureGroups, unit: monitor.unit)
+                Divider()
+                FanSection(fans: monitor.fans)
+            } else {
+                Label("SMC unavailable", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+            PanelFooter(monitor: monitor)
+        }
+        .padding(12)
+        .frame(width: 320)
+    }
+}
+
+private struct PanelHeader: View {
+    let severity: Severity
+    let thermal: ThermalState
+
+    var body: some View {
+        HStack(spacing: 6) {
+            // Same thermometer glyph as the menu bar, tinted by severity here
+            // (in-panel color is fine; it doesn't affect menu-bar alignment).
+            Image(systemName: "thermometer.medium")
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(severity.color)
+            Text("macthermal").font(.headline)
+            Spacer()
+            Circle().fill(thermal.severity.color).frame(width: 8, height: 8)
+                .accessibilityHidden(true)   // decorative; `thermal.name` beside it carries the info
+            Text(thermal.name).font(.caption).foregroundStyle(.secondary)
         }
     }
+}
+
+// A `Grid` aligns the label / value / detail columns to their widest content, so
+// there are no hand-tuned column widths to keep in sync as labels change.
+private struct TemperatureSection: View {
+    let groups: [TempGroup]
+    let unit: TempUnit
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
+            ForEach(groups) { group in
+                let lvl = tempLevel(group.hottest.celsius)
+                GridRow {
+                    Text(group.category.rawValue)
+                    Text(unit.format(group.hottest.celsius))
+                        .bold().foregroundStyle(lvl.severity.color)
+                    Text(group.detail(unit: unit, level: lvl.label))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+}
+
+private struct FanSection: View {
+    let fans: [FanReading]
+
+    var body: some View {
+        if fans.isEmpty {
+            Label("No fans (fanless or unavailable)", systemImage: "wind")
+                .font(.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
+                ForEach(fans, id: \.index) { f in
+                    let lvl = fanLevel(f.utilization)
+                    GridRow {
+                        Text("Fan \(f.index + 1)")
+                        Text(String(format: "%.0f rpm", f.rpm))
+                            .foregroundStyle(lvl.severity.color)
+                        // Flexible bar fills the middle column (no magic width).
+                        ProgressView(value: f.utilization, total: 100)
+                            .frame(maxWidth: .infinity)
+                        Text(lvl.label).font(.caption).foregroundStyle(.secondary)
+                            .gridColumnAlignment(.trailing)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+}
+
+private struct PanelFooter: View {
+    @ObservedObject var monitor: ThermalMonitor
 
     /// Bound to the monitor's cached flag so the checkbox flips instantly; the
     /// (slow) registration runs off the main thread in `setLaunchAtLogin`. Reading
@@ -243,83 +371,6 @@ struct PanelView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            header
-            Divider()
-
-            if !monitor.available {
-                Label("SMC unavailable", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
-            } else {
-                temperatures
-                Divider()
-                fansSection
-            }
-
-            Divider()
-            footer
-        }
-        .padding(12)
-        .frame(width: 320)
-    }
-
-    private var header: some View {
-        HStack(spacing: 6) {
-            // Same thermometer glyph as the menu bar, tinted by severity here
-            // (in-panel color is fine; it doesn't affect menu-bar alignment).
-            Image(systemName: "thermometer.medium")
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(monitor.menuBarSeverity.color)
-            Text("macthermal").font(.headline)
-            Spacer()
-            Circle().fill(monitor.thermal.severity.color).frame(width: 8, height: 8)
-                .accessibilityHidden(true)   // decorative; `thermal.name` beside it carries the info
-            Text(monitor.thermal.name).font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    private var temperatures: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(temperatureGroups, id: \.category) { group in
-                let hot = group.readings.first!   // safe: temperatureGroups drops empty groups
-                let lvl = tempLevel(hot.celsius)
-                HStack {
-                    Text(group.category.rawValue).frame(width: 64, alignment: .leading)
-                    Text(monitor.unit.format(hot.celsius))
-                        .bold().foregroundStyle(lvl.severity.color)
-                    Spacer()
-                    Text("\(group.readings.count) sensors · \(lvl.label)")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .accessibilityElement(children: .combine)
-            }
-        }
-    }
-
-    @ViewBuilder private var fansSection: some View {
-        if monitor.fans.isEmpty {
-            Label("No fans (fanless or unavailable)", systemImage: "wind")
-                .font(.caption).foregroundStyle(.secondary)
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(monitor.fans, id: \.index) { f in
-                    let lvl = fanLevel(f.utilization)
-                    HStack {
-                        Text("Fan \(f.index + 1)").frame(width: 64, alignment: .leading)
-                        Text(String(format: "%.0f rpm", f.rpm))
-                            .foregroundStyle(lvl.severity.color)
-                        Spacer()
-                        ProgressView(value: f.utilization, total: 100)
-                            .frame(width: 70)
-                        Text(lvl.label).font(.caption).foregroundStyle(.secondary)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-        }
-    }
-
-    private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 if let h = monitor.hottest {
