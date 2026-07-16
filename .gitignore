@@ -1,7 +1,7 @@
 # Compiled artifacts (built by `make`)
 /macthermal
 /macthermal-gui
-/macthermal.app/
+/MacThermal.app/
 
 # Test runner (built by `make test`)
 /.macthermal-tests

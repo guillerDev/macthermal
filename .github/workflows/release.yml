@@ -45,7 +45,7 @@ jobs:
       # it on download. Ship it zipped for convenience; users clear quarantine
       # with: xattr -dr com.apple.quarantine macthermal.app
       - name: Package menu-bar app
-        run: ditto -c -k --keepParent macthermal.app "macthermal-app-${TAG}.zip"
+        run: ditto -c -k --keepParent MacThermal.app "macthermal-app-${TAG}.zip"
 
       # The cask points at this zipped .app asset and pins it by hash.
       - name: Compute app zip sha256
@@ -86,7 +86,7 @@ jobs:
           ```
 
           The attached `macthermal-app-*.zip` is the ad-hoc-signed menu-bar app.
-          After downloading: `xattr -dr com.apple.quarantine macthermal.app`
+          After downloading: `xattr -dr com.apple.quarantine MacThermal.app`
           EOF
 
       - name: Create GitHub Release

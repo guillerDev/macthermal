@@ -10,7 +10,7 @@ reads the System Management Controller (SMC) directly via IOKit. It ships two
 front-ends over one shared sensor core:
 
 - a **CLI** (`macthermal`) — summary, `--all`, `--json`, `--watch` dashboard;
-- a **menu-bar app** (`macthermal.app`) — SwiftUI `MenuBarExtra` agent.
+- a **menu-bar app** (`MacThermal.app`) — SwiftUI `MenuBarExtra` agent.
 
 Pure Swift. The **`Makefile` + `swiftc` is the source of truth** for builds,
 tests, releases, and Homebrew. A `Package.swift` is committed **only** as an
@@ -24,7 +24,7 @@ source tree satisfies both. Targets macOS 13+, Apple Silicon and Intel.
 
 ```sh
 make            # CLI       -> ./macthermal
-make gui        # menu-bar  -> ./macthermal.app (ad-hoc signed, LSUIElement)
+make gui        # menu-bar  -> ./MacThermal.app (ad-hoc signed, LSUIElement)
 make open       # build the app and launch it
 make test       # pure-logic test suite — NO SMC hardware needed (CI-friendly)
 make run        # build + run the CLI
@@ -140,7 +140,7 @@ system binary and be rejected by Homebrew.
   update both `Sensors.swift` and the README table, and the threshold tests.
 - Add a test in `Tests/Tests.swift` for any new pure logic (decoding,
   thresholds, categorization, JSON). Tests must not require a live SMC.
-- Don't commit build artifacts: `macthermal`, `macthermal-gui`, `macthermal.app`
+- Don't commit build artifacts: `macthermal`, `macthermal-gui`, `MacThermal.app`
   are gitignored.
 
 ## Common tasks

@@ -67,7 +67,7 @@ homebrew-tap/
 ```
 
 The **formula** installs the CLI binary to `bin`; the **cask** installs
-`macthermal.app` to `/Applications`. They share a name but are distinct,
+`MacThermal.app` to `/Applications`. They share a name but are distinct,
 independently-installable artifacts.
 
 ### Naming convention
@@ -177,14 +177,14 @@ cask "macthermal" do
 
   depends_on macos: ">= :ventura"   # LSMinimumSystemVersion 13.0
 
-  app "macthermal.app"
+  app "MacThermal.app"
 
   caveats <<~EOS
     macthermal.app is ad-hoc signed (not notarized), so Gatekeeper blocks the
     first launch. To approve it once, either right-click the app in Finder and
     choose Open, or run:
 
-      xattr -dr com.apple.quarantine "/Applications/macthermal.app"
+      xattr -dr com.apple.quarantine "/Applications/MacThermal.app"
   EOS
 end
 ```

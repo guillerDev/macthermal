@@ -187,7 +187,7 @@ EXAMPLES:
   macthermal --watch 1       # live dashboard, 1s refresh
   macthermal --json | jq .   # pipe to other tools
 
-There is also a menu-bar GUI — build it with `make gui`, then `open macthermal.app`.
+There is also a menu-bar GUI — build it with `make gui`, then `open MacThermal.app`.
 """
 
 // MARK: - Entry point

@@ -1,6 +1,6 @@
 BIN       := macthermal
 GUI_BIN   := macthermal-gui
-APP       := macthermal.app
+APP       := MacThermal.app
 TEST_BIN  := .macthermal-tests
 PREFIX    ?= /usr/local
 

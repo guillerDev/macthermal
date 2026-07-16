@@ -297,7 +297,7 @@ private struct PanelHeader: View {
             Image(systemName: "thermometer.medium")
                 .symbolRenderingMode(.palette)
                 .foregroundStyle(severity.color)
-            Text("macthermal").font(.headline)
+            Text("MacThermal").font(.headline)
             Spacer()
             Circle().fill(thermal.severity.color).frame(width: 8, height: 8)
                 .accessibilityHidden(true)   // decorative; `thermal.name` beside it carries the info

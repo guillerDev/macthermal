@@ -25,7 +25,7 @@ Gatekeeper will block it. Approve it once by right-clicking the app in Finder
 and choosing **Open**, or run:
 
 ```sh
-xattr -dr com.apple.quarantine "/Applications/macthermal.app"
+xattr -dr com.apple.quarantine "/Applications/MacThermal.app"
 ```
 
 Prefer building from source? See **[Build](#build)** below.
@@ -34,7 +34,7 @@ Prefer building from source? See **[Build](#build)** below.
 
 ```sh
 make            # CLI  -> ./macthermal
-make gui        # GUI  -> ./macthermal.app (menu-bar app)
+make gui        # GUI  -> ./MacThermal.app (menu-bar app)
 make open       # build the app and launch it
 make test       # run the pure-logic test suite (no SMC hardware needed)
 make install    # copy the CLI to /usr/local/bin (PREFIX=... to change)
@@ -78,7 +78,7 @@ Fanless Macs (e.g. MacBook Air) report no fans, which is expected.
 
 ## Menu-bar app
 
-`make gui` builds `macthermal.app` — a lightweight menu-bar agent (`LSUIElement`,
+`make gui` builds `MacThermal.app` — a lightweight menu-bar agent (`LSUIElement`,
 no Dock icon) that shows the hottest temperature next to a thermometer icon in
 the menu bar and refreshes every few seconds. Clicking it opens a panel with:
 

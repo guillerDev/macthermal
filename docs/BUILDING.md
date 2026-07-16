@@ -45,7 +45,7 @@ disagrees, **this is what's correct.**
 
 ```sh
 make            # CLI            -> ./macthermal
-make gui        # menu-bar app   -> ./macthermal.app   (ad-hoc signed, LSUIElement)
+make gui        # menu-bar app   -> ./MacThermal.app   (ad-hoc signed, LSUIElement)
 make open       # build the app and launch it
 make run        # build + run the CLI
 make watch      # build + run the live dashboard (1s refresh)
@@ -57,7 +57,7 @@ make clean
 `make` is timestamp-driven: a no-op rebuild prints `Nothing to be done` — that's
 expected, not an error. **Run `make test` after touching `Sources/`.**
 
-Artifacts (`macthermal`, `macthermal-gui`, `macthermal.app`) are gitignored.
+Artifacts (`macthermal`, `macthermal-gui`, `MacThermal.app`) are gitignored.
 
 ## 2. Swift Package Manager (`swift` CLI)
 
