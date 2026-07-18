@@ -18,7 +18,11 @@ struct OverviewView: View {
                     LiveMetricsGrid(settings: settings, columns: columns)
                     TemperatureBreakdownView(groups: live.temperatureGroups, unit: settings.unit)
                     FanOverviewView(fans: live.fans)
-                    RecentActivityView(samples: Array(archive.history.suffix(120)), unit: settings.unit)
+                    RecentActivityView(
+                        samples: Array(archive.history.suffix(120)),
+                        unit: settings.unit,
+                        scope: $settings.temperatureChartScope
+                    )
                 } else {
                     EmptyStateView(
                         title: "SMC unavailable",

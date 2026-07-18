@@ -16,7 +16,12 @@ struct DashboardView: View {
             .navigationTitle("MacThermal Pro")
             .navigationSplitViewColumnWidth(min: 180, ideal: 210)
         } detail: {
-            DashboardDetailView(selection: selection ?? .overview, monitor: monitor, settings: settings)
+            DashboardDetailView(
+                selection: selection ?? .overview,
+                monitor: monitor,
+                settings: settings,
+                onShowContributors: { selection = .contributors }
+            )
         }
         .toolbar {
             ToolbarItemGroup {
@@ -28,6 +33,17 @@ struct DashboardView: View {
                     action: monitor.toggleIncidentRecording
                 )
                 .foregroundStyle(recording.isRecording ? .red : .primary)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                if #available(macOS 14, *) {
+                    SettingsLink {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .help("Open Settings (Command-,)")
+                } else {
+                    Button("Settings", systemImage: "gearshape", action: SettingsWindowOpener.openLegacy)
+                        .help("Open Settings (Command-,)")
+                }
             }
         }
         .alert(item: $status.presentedError) { error in

@@ -16,7 +16,12 @@ struct IncidentDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignMetrics.sectionSpacing) {
                 IncidentTitleView(incident: incident)
-                TemperatureHistoryChart(samples: incident.samples, unit: settings.unit, alertThresholdCelsius: settings.alertThresholdCelsius)
+                TemperatureHistoryChart(
+                    samples: incident.samples,
+                    unit: settings.unit,
+                    alertThresholdCelsius: settings.alertThresholdCelsius,
+                    scope: $settings.temperatureChartScope
+                )
                     .frame(minHeight: 280)
                 HistorySummaryGrid(samples: incident.samples, unit: settings.unit)
                 IncidentChangeView(incident: incident, unit: settings.unit)

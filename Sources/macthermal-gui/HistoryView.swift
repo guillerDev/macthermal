@@ -27,7 +27,8 @@ struct HistoryView: View {
                         TemperatureHistoryChart(
                             samples: displayedSamples,
                             unit: settings.unit,
-                            alertThresholdCelsius: settings.alertsEnabled ? settings.alertThresholdCelsius : nil
+                            alertThresholdCelsius: settings.alertsEnabled ? settings.alertThresholdCelsius : nil,
+                            scope: $settings.temperatureChartScope
                         )
                         .frame(minHeight: 320)
 

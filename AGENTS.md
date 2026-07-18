@@ -107,7 +107,9 @@ see `Makefile`: `SHARED`, `CLI_SRC`, `GUI_SRC`, `TEST_SRC`.
   sample and compacts it at most daily according to retention. Loading and
   compaction stream lines instead of materializing the encoded file. Keep
   decoding tolerant of a truncated last line so a crash cannot invalidate
-  earlier data.
+  earlier data. `ThermalSample.categoryAverages` is optional because samples
+  recorded before component-average charts only contain `categoryPeaks`; do not
+  make that field required without a storage migration.
 - **Incident cadence stays separate.** General history always follows the user's
   15/30/60-second interval. Two-second samples recorded during an incident go to
   `active-incident.ndjson` and the bounded incident segment only; mixing them
@@ -116,6 +118,14 @@ see `Makefile`: `SHARED`, `CLI_SRC`, `GUI_SRC`, `TEST_SRC`.
   memory (enough for two seven-day comparison periods), while disk retention can
   remain longer. Active incidents are journaled incrementally, split at the
   configured duration, and pruned by age/count after finalization.
+- **Comparison semantics live in the core.** `ThermalComparisonAssessment`
+  applies noise tolerances and can report improved, regressed, mixed, or
+  unchanged results. Fan effort is contextual rather than inherently good or
+  bad, and an absent fan sensor must be presented as unavailable rather than
+  zero load.
+- **Automatic capture is independent from notifications.** Its master switch
+  controls only automatic incidents; manual recording remains available and
+  shared temperature-detection rules stay editable when notifications are off.
 - **Correlation is not causation.** `ThermalAnalytics` correlates sampled CPU
   percentages with hotspot temperature. UI and reports must keep the disclaimer;
   never label a process as the definitive cause of heat.

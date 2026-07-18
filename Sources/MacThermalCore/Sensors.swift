@@ -116,14 +116,18 @@ public struct ThermalState: Equatable, Sendable {
         self.severity = severity
     }
 
-    public static func current() -> ThermalState {
-        switch ProcessInfo.processInfo.thermalState {
-        case .nominal:  return .init(name: "nominal",  note: "no thermal pressure", severity: .ok)
-        case .fair:     return .init(name: "fair",     note: "slightly elevated; fans ramping", severity: .normal)
-        case .serious:  return .init(name: "serious",  note: "OS is throttling to shed heat", severity: .warn)
-        case .critical: return .init(name: "critical", note: "aggressive throttling to prevent shutdown", severity: .critical)
-        @unknown default: return .init(name: "unknown", note: "", severity: .ok)
+    public init(processInfoState: ProcessInfo.ThermalState) {
+        switch processInfoState {
+        case .nominal:  self.init(name: "nominal",  note: "no thermal pressure", severity: .ok)
+        case .fair:     self.init(name: "fair",     note: "macOS reports mildly elevated thermal pressure", severity: .normal)
+        case .serious:  self.init(name: "serious",  note: "OS is throttling to shed heat", severity: .warn)
+        case .critical: self.init(name: "critical", note: "aggressive throttling to prevent shutdown", severity: .critical)
+        @unknown default: self.init(name: "unknown", note: "", severity: .ok)
         }
+    }
+
+    public static func current() -> ThermalState {
+        ThermalState(processInfoState: ProcessInfo.processInfo.thermalState)
     }
 }
 

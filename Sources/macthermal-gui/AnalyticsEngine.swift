@@ -74,6 +74,10 @@ actor AnalyticsEngine {
         }
         return ComparisonAnalysis(
             comparison: ThermalComparison(baselineSamples: baseline, currentSamples: current),
+            baselineStart: baselineStart,
+            baselineEnd: currentStart,
+            currentStart: currentStart,
+            currentEnd: currentEnd,
             baselineCoverage: ThermalPeriodCoverage(
                 samples: baseline,
                 expectedStart: baselineStart,
@@ -92,6 +96,10 @@ actor AnalyticsEngine {
 
 struct ComparisonAnalysis: Sendable {
     let comparison: ThermalComparison
+    let baselineStart: Date
+    let baselineEnd: Date
+    let currentStart: Date
+    let currentEnd: Date
     let baselineCoverage: ThermalPeriodCoverage
     let currentCoverage: ThermalPeriodCoverage
 

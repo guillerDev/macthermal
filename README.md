@@ -84,15 +84,18 @@ temperature and opens a compact panel; **Open Dashboard** reveals the full app.
 
 The Pro dashboard adds:
 
-- local temperature and fan history with native Swift Charts,
+- local temperature and fan history with native Swift Charts, including
+  independent peak/average lines and a persistent Overall/CPU/GPU/Memory/
+  Battery/Ambient selector,
 - an automatic thermal timeline for threshold crossings, pressure escalation,
   and recovery,
 - configurable sustained-temperature and OS thermal-pressure notifications,
 - throttling detection based on macOS' reported thermal-pressure state,
 - CPU/process correlation to identify likely heat contributors,
 - current-vs-previous and incident start-vs-end comparisons,
-- a manual recorder plus automatic incident capture for serious/critical macOS
-  pressure or a sustained hotspot above the configured threshold,
+- a manual recorder plus optional automatic incident capture for
+  serious/critical macOS pressure or a sustained hotspot above the configured
+  threshold,
 - renameable incident recordings for workloads and symptoms,
 - standalone, dark-mode HTML diagnostic reports with privacy-safe system
   context, plus detailed CSV sample exports.
@@ -104,7 +107,9 @@ fluctuation does not split one thermal episode into several files. Each one
 also includes up to two minutes of pre-trigger history to preserve the lead-up.
 Active recordings use a recoverable incremental journal, and long episodes are
 split at a configurable duration so they cannot grow without bound in memory.
-Incident retention and maximum recording count are configurable in Settings.
+Automatic recording has a master switch independent from notifications and
+manual recording. Incident retention and maximum recording count are
+configurable in Settings.
 High-resolution incident samples stay in the incident journal; the general
 history always keeps its selected 15/30/60-second cadence so comparisons remain
 statistically balanced.
@@ -120,7 +125,9 @@ The compact menu panel includes:
 - the OS thermal-pressure and throttling state,
 - the hottest temperature per component (CPU / GPU / memory / battery / …),
 - per-fan RPM with a utilization bar,
-- incident recording, dashboard, settings, refresh, and launch-at-login controls.
+- incident recording, dashboard, refresh, and launch-at-login controls. Settings
+  live in the dashboard toolbar and remain available with the standard `⌘,`
+  shortcut.
 
 The **Open at Login** checkbox registers the app as a login item via the modern
 `SMAppService` API (macOS 13+) — no helper bundle, nothing to configure by hand.

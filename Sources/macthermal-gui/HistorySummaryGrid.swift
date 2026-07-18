@@ -28,10 +28,12 @@ struct HistorySummaryGrid: View {
             )
             MetricCard(
                 title: "Average fan load",
-                value: "\(summary.averageFanUtilization.formatted(.number.precision(.fractionLength(0))))%",
-                detail: "Average across reported fans",
+                value: summary.hasFanData
+                    ? "\(summary.averageFanUtilization.formatted(.number.precision(.fractionLength(0))))%"
+                    : "Not available",
+                detail: summary.hasFanData ? "Average across reported fans" : "No fan sensors were reported",
                 systemImage: "fan",
-                tint: fanLevel(summary.averageFanUtilization).severity.color
+                tint: summary.hasFanData ? fanLevel(summary.averageFanUtilization).severity.color : .secondary
             )
             MetricCard(
                 title: "Thermal pressure",
