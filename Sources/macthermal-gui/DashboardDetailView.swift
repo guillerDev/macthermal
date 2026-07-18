@@ -4,6 +4,7 @@ struct DashboardDetailView: View {
     let selection: DashboardSection
     let monitor: ThermalMonitor
     @ObservedObject var settings: AppSettings
+    let onShowContributors: () -> Void
 
     var body: some View {
         switch selection {
@@ -16,7 +17,7 @@ struct DashboardDetailView: View {
         case .contributors:
             ContributorsView()
         case .comparison:
-            ComparisonView(settings: settings)
+            ComparisonView(settings: settings, onShowContributors: onShowContributors)
         case .incidents:
             IncidentsView(monitor: monitor, settings: settings)
         }

@@ -5,11 +5,15 @@ import MacThermalCore
 
 struct ComparisonView: View {
     @ObservedObject var settings: AppSettings
+    let onShowContributors: () -> Void
     @EnvironmentObject private var archive: ThermalArchiveState
     @State private var range: HistoryRange = .oneHour
     @State private var analysis: ComparisonAnalysis?
 
-    private let columns = [GridItem(.adaptive(minimum: 210), spacing: DesignMetrics.standardSpacing)]
+    private let columns = [
+        GridItem(.flexible(minimum: 220), spacing: DesignMetrics.standardSpacing),
+        GridItem(.flexible(minimum: 220), spacing: DesignMetrics.standardSpacing),
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,7 +27,7 @@ struct ComparisonView: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
                 Spacer()
-                Text(coverageLabel)
+                Text("Current period vs immediately preceding period")
                     .foregroundStyle(.secondary)
             }
             .padding()
@@ -31,43 +35,80 @@ struct ComparisonView: View {
 
             if let analysis, analysis.isReliable {
                 let comparison = analysis.comparison
+                let assessment = ThermalComparisonAssessment(comparison: comparison)
                 ScrollView {
                     VStack(alignment: .leading, spacing: DesignMetrics.sectionSpacing) {
+                        LazyVGrid(columns: columns, spacing: DesignMetrics.standardSpacing) {
+                            ComparisonPeriodSummaryView(
+                                title: "Previous",
+                                systemImage: "clock.arrow.circlepath",
+                                start: analysis.baselineStart,
+                                end: analysis.baselineEnd,
+                                coverage: analysis.baselineCoverage
+                            )
+                            ComparisonPeriodSummaryView(
+                                title: "Current",
+                                systemImage: "clock",
+                                start: analysis.currentStart,
+                                end: analysis.currentEnd,
+                                coverage: analysis.currentCoverage
+                            )
+                        }
+
+                        Text("Thermal metrics")
+                            .font(.headline)
+
                         LazyVGrid(columns: columns, spacing: DesignMetrics.standardSpacing) {
                             ComparisonMetricCard(
                                 title: "Average hotspot",
                                 baseline: settings.unit.format(comparison.baseline.averageHotspotCelsius),
                                 current: settings.unit.format(comparison.current.averageHotspotCelsius),
-                                delta: temperatureDelta(comparison.hotspotDeltaCelsius),
-                                improved: comparison.hotspotDeltaCelsius <= 0,
+                                delta: temperatureDelta(
+                                    comparison.hotspotDeltaCelsius,
+                                    trend: assessment.averageHotspotTrend
+                                ),
+                                deltaValue: comparison.hotspotDeltaCelsius,
+                                trend: assessment.averageHotspotTrend,
                                 systemImage: "thermometer.medium"
                             )
                             ComparisonMetricCard(
                                 title: "Peak hotspot",
                                 baseline: settings.unit.format(comparison.baseline.peakHotspotCelsius),
                                 current: settings.unit.format(comparison.current.peakHotspotCelsius),
-                                delta: temperatureDelta(comparison.peakDeltaCelsius),
-                                improved: comparison.peakDeltaCelsius <= 0,
+                                delta: temperatureDelta(
+                                    comparison.peakDeltaCelsius,
+                                    trend: assessment.peakHotspotTrend
+                                ),
+                                deltaValue: comparison.peakDeltaCelsius,
+                                trend: assessment.peakHotspotTrend,
                                 systemImage: "thermometer.high"
                             )
                             ComparisonMetricCard(
                                 title: "Average fan load",
-                                baseline: percent(comparison.baseline.averageFanUtilization),
-                                current: percent(comparison.current.averageFanUtilization),
-                                delta: signedPercent(comparison.fanDeltaPercent),
-                                improved: comparison.fanDeltaPercent <= 0,
+                                baseline: fanValue(comparison.baseline),
+                                current: fanValue(comparison.current),
+                                delta: fanDelta(comparison: comparison, trend: assessment.fanTrend),
+                                deltaValue: comparison.fanDataAvailable ? comparison.fanDeltaPercent : 0,
+                                trend: assessment.fanTrend,
                                 systemImage: "fan"
                             )
                             ComparisonMetricCard(
                                 title: "Thermal pressure rate",
                                 baseline: percent(comparison.baseline.pressureFraction * 100),
                                 current: percent(comparison.current.pressureFraction * 100),
-                                delta: signedPercent(comparison.pressureFractionDelta * 100),
-                                improved: comparison.pressureFractionDelta <= 0,
+                                delta: percentageDelta(
+                                    comparison.pressureFractionDelta * 100,
+                                    trend: assessment.pressureTrend
+                                ),
+                                deltaValue: comparison.pressureFractionDelta,
+                                trend: assessment.pressureTrend,
                                 systemImage: "gauge.with.dots.needle.67percent"
                             )
                         }
-                        ComparisonInterpretationView(comparison: comparison)
+                        ComparisonInterpretationView(
+                            assessment: assessment,
+                            onShowContributors: onShowContributors
+                        )
                     }
                     .padding()
                 }
@@ -79,7 +120,7 @@ struct ComparisonView: View {
                 )
             }
         }
-        .navigationTitle("Before & After")
+        .navigationTitle("Period Comparison")
         .task(id: analysisRevision) { await updateComparison() }
     }
 
@@ -102,17 +143,30 @@ struct ComparisonView: View {
         }
     }
 
-    private func temperatureDelta(_ value: Double) -> String {
+    private func temperatureDelta(_ value: Double, trend: ComparisonTrend) -> String {
+        guard trend != .unchanged else { return "Unchanged" }
         let convertedDelta = settings.unit == .celsius ? value : value * 9 / 5
-        return "\(convertedDelta >= 0 ? "+" : "")\(convertedDelta.formatted(.number.precision(.fractionLength(1))))\(settings.unit.symbol)"
+        let change = "\(convertedDelta >= 0 ? "+" : "")\(convertedDelta.formatted(.number.precision(.fractionLength(1))))\(settings.unit.symbol)"
+        return "\(change) · \(value > 0 ? "Warmer" : "Cooler")"
     }
 
     private func percent(_ value: Double) -> String {
         "\(value.formatted(.number.precision(.fractionLength(0))))%"
     }
 
-    private func signedPercent(_ value: Double) -> String {
-        "\(value >= 0 ? "+" : "")\(value.formatted(.number.precision(.fractionLength(0))))%"
+    private func percentageDelta(_ value: Double, trend: ComparisonTrend) -> String {
+        guard trend != .unchanged else { return "Unchanged" }
+        let change = "\(value >= 0 ? "+" : "")\(value.formatted(.number.precision(.fractionLength(0))))%"
+        return "\(change) · \(value > 0 ? "Higher" : "Lower")"
+    }
+
+    private func fanValue(_ summary: ThermalSummary) -> String {
+        summary.hasFanData ? percent(summary.averageFanUtilization) : "Not available"
+    }
+
+    private func fanDelta(comparison: ThermalComparison, trend: ComparisonTrend) -> String {
+        guard comparison.fanDataAvailable else { return "No comparable fan data" }
+        return percentageDelta(comparison.fanDeltaPercent, trend: trend)
     }
 
     private var analysisRevision: ComparisonAnalysisRevision {
@@ -122,13 +176,6 @@ struct ComparisonView: View {
             historyInterval: settings.historyInterval,
             retentionDays: settings.retentionDays
         )
-    }
-
-    private var coverageLabel: String {
-        guard let analysis else { return "Current period vs previous period" }
-        let previous = Int((analysis.baselineCoverage.fraction * 100).rounded())
-        let current = Int((analysis.currentCoverage.fraction * 100).rounded())
-        return "Coverage: previous \(previous)% · current \(current)%"
     }
 
     private var emptyStateTitle: String {

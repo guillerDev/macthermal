@@ -26,9 +26,14 @@ struct IncidentChangeView: View {
                     }
                     GridRow {
                         Text("Fan load")
-                        Text(percent(comparison.baseline.averageFanUtilization))
-                        Text(percent(comparison.current.averageFanUtilization))
-                        DeltaLabel(value: comparison.fanDeltaPercent, suffix: "%", lowerIsBetter: true)
+                        Text(comparison.baseline.hasFanData ? percent(comparison.baseline.averageFanUtilization) : "Not available")
+                        Text(comparison.current.hasFanData ? percent(comparison.current.averageFanUtilization) : "Not available")
+                        if comparison.fanDataAvailable {
+                            DeltaLabel(value: comparison.fanDeltaPercent, suffix: "%", lowerIsBetter: true)
+                        } else {
+                            Text("No comparison")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

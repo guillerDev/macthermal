@@ -17,6 +17,7 @@ public struct AutomaticIncidentDetector: Sendable {
 
     public mutating func evaluate(
         sample: ThermalSample,
+        automaticCaptureEnabled: Bool = true,
         pressureEnabled: Bool,
         temperatureEnabled: Bool,
         thresholdCelsius: Double,
@@ -24,7 +25,7 @@ public struct AutomaticIncidentDetector: Sendable {
         recoveryDuration: TimeInterval,
         now: Date
     ) -> AutomaticIncidentTransition? {
-        guard pressureEnabled || temperatureEnabled else {
+        guard automaticCaptureEnabled && (pressureEnabled || temperatureEnabled) else {
             let shouldStop = activeTrigger != nil
             reset()
             return shouldStop ? .stop : nil

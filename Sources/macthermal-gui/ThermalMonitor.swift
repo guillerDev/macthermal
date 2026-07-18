@@ -221,6 +221,7 @@ final class ThermalMonitor: ObservableObject {
 
         let automaticTransition = automaticIncidentDetector.evaluate(
             sample: sample,
+            automaticCaptureEnabled: settings.automaticIncidentCaptureEnabled,
             pressureEnabled: settings.autoRecordPressureIncidents,
             temperatureEnabled: settings.autoRecordTemperatureIncidents,
             thresholdCelsius: settings.alertThresholdCelsius,

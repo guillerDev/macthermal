@@ -21,6 +21,10 @@ public struct ThermalComparison: Equatable, Sendable {
         current.averageFanUtilization - baseline.averageFanUtilization
     }
 
+    public var fanDataAvailable: Bool {
+        baseline.hasFanData && current.hasFanData
+    }
+
     public var pressureFractionDelta: Double {
         current.pressureFraction - baseline.pressureFraction
     }

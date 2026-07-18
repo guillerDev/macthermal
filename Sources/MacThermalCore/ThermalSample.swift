@@ -2,13 +2,16 @@ import Foundation
 
 /// A compact, persistable snapshot used by charts, reports, comparisons, and
 /// incident recordings. Raw per-key readings remain available in the live UI;
-/// history stores category peaks to keep its on-disk footprint bounded.
+/// history stores category aggregates to keep its on-disk footprint bounded.
 public struct ThermalSample: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let timestamp: Date
     public let hottestCelsius: Double
     public let averageCelsius: Double
     public let categoryPeaks: [String: Double]
+    /// Optional for backward compatibility with history recorded before
+    /// per-category averages were introduced.
+    public let categoryAverages: [String: Double]?
     public let fanRPM: [Double]
     public let fanUtilization: [Double]
     public let thermalStateName: String
@@ -25,6 +28,7 @@ public struct ThermalSample: Codable, Equatable, Identifiable, Sendable {
         hottestCelsius: Double,
         averageCelsius: Double,
         categoryPeaks: [String: Double],
+        categoryAverages: [String: Double]? = nil,
         fanRPM: [Double],
         fanUtilization: [Double],
         thermalStateName: String,
@@ -38,6 +42,7 @@ public struct ThermalSample: Codable, Equatable, Identifiable, Sendable {
         self.hottestCelsius = hottestCelsius
         self.averageCelsius = averageCelsius
         self.categoryPeaks = categoryPeaks
+        self.categoryAverages = categoryAverages
         self.fanRPM = fanRPM
         self.fanUtilization = fanUtilization
         self.thermalStateName = thermalStateName
@@ -55,9 +60,12 @@ public struct ThermalSample: Codable, Equatable, Identifiable, Sendable {
         timestamp: Date = .now
     ) {
         var peaks: [String: Double] = [:]
+        var averages: [String: Double] = [:]
         for category in Category.allCases {
-            if let hottest = snapshot.group(category).first?.celsius {
+            let readings = snapshot.group(category)
+            if let hottest = readings.first?.celsius {
                 peaks[category.rawValue] = hottest
+                averages[category.rawValue] = readings.averageCelsius
             }
         }
 
@@ -66,6 +74,7 @@ public struct ThermalSample: Codable, Equatable, Identifiable, Sendable {
             hottestCelsius: snapshot.hottest?.celsius ?? 0,
             averageCelsius: snapshot.averageC,
             categoryPeaks: peaks,
+            categoryAverages: averages,
             fanRPM: snapshot.fans.map(\.rpm),
             fanUtilization: snapshot.fans.map(\.utilization),
             thermalStateName: snapshot.thermal.name,

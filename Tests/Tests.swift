@@ -46,7 +46,7 @@ struct Tests {
     static func sample(
         seconds: TimeInterval,
         hotspot: Double,
-        fan: Double = 20,
+        fan: Double? = 20,
         severity: Severity = .ok,
         processCPU: Double = 0,
         processSnapshotID: UUID? = nil
@@ -65,8 +65,9 @@ struct Tests {
             hottestCelsius: hotspot,
             averageCelsius: hotspot - 10,
             categoryPeaks: ["CPU": hotspot],
-            fanRPM: [2_000],
-            fanUtilization: [fan],
+            categoryAverages: ["CPU": hotspot - 10],
+            fanRPM: fan.map { _ in [2_000] } ?? [],
+            fanUtilization: fan.map { [$0] } ?? [],
             thermalStateName: stateName,
             thermalSeverity: severity,
             topProcesses: processes,
@@ -108,6 +109,12 @@ struct Tests {
         expect(tempLevel(99).severity == .hot, "tempLevel 99 = hot")
         expect(tempLevel(100).severity == .critical, "tempLevel 100 = critical")
 
+        let fairThermalState = ThermalState(processInfoState: .fair)
+        expect(fairThermalState.note == "macOS reports mildly elevated thermal pressure",
+               "fair thermal pressure uses hardware-neutral wording")
+        expect(!fairThermalState.note.localizedCaseInsensitiveContains("fan"),
+               "thermal pressure does not claim that fans are present")
+
         // --- fan thresholds ---
         expect(fanLevel(4).label == "idle", "fanLevel < 5 = idle")
         expect(fanLevel(49).label == "low", "fanLevel 49 = low")
@@ -129,6 +136,50 @@ struct Tests {
         let comparison = ThermalComparison(baselineSamples: baselineSamples, currentSamples: currentSamples)
         eq(comparison.hotspotDeltaCelsius, 15, "comparison hotspot delta = +15°C")
         expect(comparison.current.pressureSampleCount == 1, "comparison counts serious pressure samples")
+
+        let fanlessSummary = ThermalSummary(samples: [
+            sample(seconds: 0, hotspot: 65, fan: nil),
+            sample(seconds: 30, hotspot: 66, fan: nil),
+        ])
+        expect(!fanlessSummary.hasFanData && fanlessSummary.fanSampleCount == 0,
+               "summary distinguishes missing fan sensors from zero fan load")
+        let partialFanSummary = ThermalSummary(samples: [
+            sample(seconds: 0, hotspot: 65, fan: nil),
+            sample(seconds: 30, hotspot: 66, fan: 30),
+        ])
+        eq(partialFanSummary.averageFanUtilization, 30,
+           "fan average excludes samples that contain no fan sensors")
+
+        let mixedComparison = ThermalComparison(
+            baselineSamples: [
+                sample(seconds: 0, hotspot: 34.3),
+                sample(seconds: 30, hotspot: 106.3),
+            ],
+            currentSamples: [
+                sample(seconds: 60, hotspot: 65.2),
+                sample(seconds: 90, hotspot: 79.6),
+            ]
+        )
+        let mixedAssessment = ThermalComparisonAssessment(comparison: mixedComparison)
+        expect(mixedAssessment.averageHotspotTrend == .regressed,
+               "comparison marks a meaningful average hotspot increase as a regression")
+        expect(mixedAssessment.peakHotspotTrend == .improved,
+               "comparison marks a meaningful peak reduction as an improvement")
+        expect(mixedAssessment.pressureTrend == .unchanged,
+               "comparison treats zero pressure delta as unchanged")
+        expect(mixedAssessment.result == .mixed,
+               "opposing average and peak trends produce a mixed result")
+
+        let unchangedAssessment = ThermalComparisonAssessment(comparison: ThermalComparison(
+            baselineSamples: [sample(seconds: 0, hotspot: 70, fan: 20)],
+            currentSamples: [sample(seconds: 30, hotspot: 70.5, fan: 22)],
+        ))
+        expect(unchangedAssessment.averageHotspotTrend == .unchanged,
+               "temperature noise inside the tolerance remains unchanged")
+        expect(unchangedAssessment.fanTrend == .unchanged,
+               "fan changes inside the tolerance remain unchanged")
+        expect(unchangedAssessment.result == .unchanged,
+               "an assessment ignores changes inside metric tolerances")
 
         // --- chart density reduction preserves chronology and thermal peaks ---
         let denseSamples = (0..<2_500).map { index in
@@ -211,8 +262,24 @@ struct Tests {
         if let encoded = try? JSONEncoder().encode(correlationSamples[0]),
            let decoded = try? JSONDecoder().decode(ThermalSample.self, from: encoded) {
             expect(decoded == correlationSamples[0], "thermal sample survives Codable round-trip")
+            eq(decoded.categoryAverages?["CPU"], 40, "thermal sample persists category averages")
         } else {
             expect(false, "thermal sample encodes and decodes")
+        }
+        if let encoded = try? JSONEncoder().encode(correlationSamples[0]),
+           var legacyObject = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any] {
+            legacyObject.removeValue(forKey: "categoryAverages")
+            if let legacyData = try? JSONSerialization.data(withJSONObject: legacyObject),
+               let legacySample = try? JSONDecoder().decode(ThermalSample.self, from: legacyData) {
+                expect(legacySample.categoryAverages == nil,
+                       "samples recorded before category averages remain decodable")
+                eq(legacySample.categoryPeaks["CPU"], 50,
+                   "legacy sample keeps its component peak")
+            } else {
+                expect(false, "legacy thermal sample decodes without category averages")
+            }
+        } else {
+            expect(false, "legacy thermal sample fixture can be created")
         }
         let csvReport = DiagnosticReportRenderer.csv(samples: correlationSamples)
         expect(csvReport.hasPrefix("timestamp,hotspot_c"), "CSV report has stable header")
@@ -330,6 +397,38 @@ struct Tests {
             recoveryDuration: 60,
             now: Date(timeIntervalSince1970: 1)
         ) == .stop, "disabling automatic capture stops its active incident")
+
+        var masterDisabledDetector = AutomaticIncidentDetector()
+        expect(masterDisabledDetector.evaluate(
+            sample: sample(seconds: 0, hotspot: 82, severity: .critical),
+            automaticCaptureEnabled: false,
+            pressureEnabled: true,
+            temperatureEnabled: true,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 0)
+        ) == nil, "the master switch prevents automatic incident recording")
+        _ = masterDisabledDetector.evaluate(
+            sample: sample(seconds: 1, hotspot: 82, severity: .critical),
+            automaticCaptureEnabled: true,
+            pressureEnabled: true,
+            temperatureEnabled: false,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 1)
+        )
+        expect(masterDisabledDetector.evaluate(
+            sample: sample(seconds: 2, hotspot: 82, severity: .critical),
+            automaticCaptureEnabled: false,
+            pressureEnabled: true,
+            temperatureEnabled: false,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 2)
+        ) == .stop, "turning off the master switch stops an active automatic incident")
 
         var hotIncidentDetector = AutomaticIncidentDetector()
         expect(hotIncidentDetector.evaluate(

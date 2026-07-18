@@ -6,6 +6,7 @@ import MacThermalCore
 struct RecentActivityView: View {
     let samples: [ThermalSample]
     let unit: TempUnit
+    @Binding var scope: TemperatureChartScope
 
     var body: some View {
         GroupBox("Recent activity") {
@@ -14,7 +15,12 @@ struct RecentActivityView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 140)
             } else {
-                TemperatureHistoryChart(samples: samples, unit: unit, alertThresholdCelsius: nil)
+                TemperatureHistoryChart(
+                    samples: samples,
+                    unit: unit,
+                    alertThresholdCelsius: nil,
+                    scope: $scope
+                )
                     .frame(minHeight: 220)
             }
         }

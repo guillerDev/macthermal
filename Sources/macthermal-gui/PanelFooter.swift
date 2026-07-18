@@ -23,15 +23,6 @@ struct PanelFooter: View {
 
                 Button("Refresh", systemImage: "arrow.clockwise", action: monitor.refresh)
                     .labelStyle(.iconOnly)
-                if #available(macOS 14, *) {
-                    SettingsLink {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-                    .labelStyle(.iconOnly)
-                } else {
-                    Button("Settings", systemImage: "gearshape", action: SettingsWindowOpener.openLegacy)
-                        .labelStyle(.iconOnly)
-                }
                 Button("Quit", systemImage: "power", action: quit)
                     .labelStyle(.iconOnly)
             }

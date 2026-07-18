@@ -37,8 +37,7 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Alerts") {
-                Toggle("Temperature and pressure alerts", isOn: $settings.alertsEnabled)
+            Section("Thermal detection") {
                 LabeledContent("Hotspot threshold") {
                     HStack {
                         Slider(value: $settings.alertThresholdCelsius, in: 70...110, step: 1)
@@ -46,13 +45,18 @@ struct SettingsView: View {
                             .monospacedDigit()
                     }
                 }
-                .disabled(!settings.alertsEnabled)
                 Picker("Sustained for", selection: $settings.sustainedAlertSeconds) {
                     Text("15 seconds").tag(TimeInterval(15))
                     Text("1 minute").tag(TimeInterval(60))
                     Text("5 minutes").tag(TimeInterval(300))
                 }
-                .disabled(!settings.alertsEnabled)
+                Text("These detection rules are shared by high-temperature notifications and automatic incident recording.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Notifications") {
+                Toggle("Temperature and pressure notifications", isOn: $settings.alertsEnabled)
                 Picker("Notification cooldown", selection: $settings.alertCooldownMinutes) {
                     Text("5 minutes").tag(5.0)
                     Text("15 minutes").tag(15.0)
@@ -71,15 +75,27 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Automatic incident capture") {
+            Section("Automatic incident recording") {
+                Toggle("Record thermal incidents automatically", isOn: $settings.automaticIncidentCaptureEnabled)
                 Toggle("Serious or critical macOS pressure", isOn: $settings.autoRecordPressureIncidents)
+                    .disabled(!settings.automaticIncidentCaptureEnabled)
                 Toggle("Sustained temperature above the alert threshold", isOn: $settings.autoRecordTemperatureIncidents)
+                    .disabled(!settings.automaticIncidentCaptureEnabled)
                 Picker("Stop after recovery", selection: $settings.automaticIncidentRecoverySeconds) {
                     Text("30 seconds").tag(TimeInterval(30))
                     Text("1 minute").tag(TimeInterval(60))
                     Text("2 minutes").tag(TimeInterval(120))
                 }
-                .disabled(!settings.autoRecordPressureIncidents && !settings.autoRecordTemperatureIncidents)
+                .disabled(
+                    !settings.automaticIncidentCaptureEnabled
+                        || (!settings.autoRecordPressureIncidents && !settings.autoRecordTemperatureIncidents)
+                )
+                Text("Turning this off stops an active automatic recording after the next sample. Manual recording remains available.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Incident storage") {
                 Picker("Split long recordings every", selection: $settings.maximumIncidentDurationMinutes) {
                     Text("30 minutes").tag(30.0)
                     Text("1 hour").tag(60.0)
@@ -95,7 +111,7 @@ struct SettingsView: View {
                     Text("25 incidents").tag(25)
                     Text("50 incidents").tag(50)
                 }
-                Text("Automatic recordings include up to two minutes before the trigger, preserve high-resolution samples through the episode, and stop after sustained recovery.")
+                Text("Automatic recordings include up to two minutes before the trigger. Storage limits apply to both automatic and manual incidents.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

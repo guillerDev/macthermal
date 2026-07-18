@@ -6,9 +6,13 @@ struct DeltaLabel: View {
     let lowerIsBetter: Bool
 
     var body: some View {
-        let improved = lowerIsBetter ? value <= 0 : value >= 0
-        Label(formattedValue, systemImage: value <= 0 ? "arrow.down.right" : "arrow.up.right")
-            .foregroundStyle(improved ? .green : .orange)
+        let neutral = abs(value) < 0.05
+        let improved = lowerIsBetter ? value < 0 : value > 0
+        Label(
+            neutral ? "Unchanged" : formattedValue,
+            systemImage: neutral ? "equal" : value < 0 ? "arrow.down.right" : "arrow.up.right"
+        )
+        .foregroundStyle(neutral ? Color.secondary : improved ? Color.green : Color.orange)
     }
 
     private var formattedValue: String {
