@@ -11,10 +11,10 @@ PREFIX    ?= /usr/local
 ARCH   := $(shell uname -m)
 DEPLOY := -target $(ARCH)-apple-macos13.0
 
-SHARED   := Sources/MacThermalCore/SMC.swift Sources/MacThermalCore/Sensors.swift
+SHARED   := $(filter-out Sources/MacThermalCore/JSONReport.swift,$(wildcard Sources/MacThermalCore/*.swift))
 REPORT   := Sources/MacThermalCore/JSONReport.swift
 CLI_SRC  := $(SHARED) $(REPORT) Sources/macthermal/main.swift
-GUI_SRC  := $(SHARED) Sources/macthermal-gui/MenuBarApp.swift
+GUI_SRC  := $(SHARED) $(wildcard Sources/macthermal-gui/*.swift)
 TEST_SRC := $(SHARED) $(REPORT) Tests/Tests.swift
 
 .PHONY: all build run watch test gui icon open clean install uninstall
@@ -43,7 +43,7 @@ gui: $(APP)
 
 $(APP): $(GUI_SRC) Resources/Info.plist Resources/AppIcon.icns
 	swiftc -O $(DEPLOY) -parse-as-library -framework IOKit -framework SwiftUI -framework AppKit \
-		-framework ServiceManagement \
+		-framework ServiceManagement -framework Charts -framework UserNotifications \
 		-o $(GUI_BIN) $(GUI_SRC)
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources

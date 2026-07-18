@@ -5,7 +5,7 @@ import Foundation
 // A UI-agnostic health level. The CLI maps it to ANSI colors; the GUI maps it
 // to SwiftUI colors. Neither concern leaks into the sensor layer.
 
-public enum Severity {
+public enum Severity: String, Codable, Sendable {
     case ok, normal, warn, hot, critical
 }
 
@@ -24,7 +24,7 @@ let knownLabels: [String: String] = [
     "Tm0P": "Memory", "TPCD": "PCH",
 ]
 
-public enum Category: String, CaseIterable, Hashable {
+public enum Category: String, CaseIterable, Codable, Hashable, Sendable {
     case cpu = "CPU"
     case gpu = "GPU"
     case memory = "Memory"
@@ -51,7 +51,7 @@ func label(for key: String) -> String { knownLabels[key] ?? key }
 
 // MARK: - Data model
 
-public struct TempReading: Equatable {
+public struct TempReading: Equatable, Sendable {
     public let key: String
     public let label: String
     public let category: Category
@@ -67,7 +67,7 @@ extension Array where Element == TempReading {
     public var averageCelsius: Double { isEmpty ? 0 : map { $0.celsius }.reduce(0, +) / Double(count) }
 }
 
-public struct FanReading: Equatable {
+public struct FanReading: Equatable, Sendable {
     public let index: Int
     public let rpm: Double
     public let min: Double
@@ -105,10 +105,16 @@ public func fanLevel(_ u: Double) -> (label: String, severity: Severity) {
 // The Apple Silicon-supported equivalent of the legacy Intel `pmset -g therm`
 // thermal levels (which report "unsupported on this machine" on M-series).
 
-public struct ThermalState: Equatable {
+public struct ThermalState: Equatable, Sendable {
     public let name: String
     public let note: String
     public let severity: Severity
+
+    public init(name: String, note: String, severity: Severity) {
+        self.name = name
+        self.note = note
+        self.severity = severity
+    }
 
     public static func current() -> ThermalState {
         switch ProcessInfo.processInfo.thermalState {
@@ -170,7 +176,7 @@ public func collectFans(_ smc: SMC) -> [FanReading] {
 
 // MARK: - Snapshot (aggregate convenience for UIs)
 
-public struct Snapshot {
+public struct Snapshot: Sendable {
     public let temps: [TempReading]
     public let fans: [FanReading]
     public let thermal: ThermalState

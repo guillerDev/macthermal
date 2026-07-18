@@ -76,22 +76,50 @@ All temperatures nominal. System is cool and idle-to-light.
 
 Fanless Macs (e.g. MacBook Air) report no fans, which is expected.
 
-## Menu-bar app
+## MacThermal Pro app
 
-`make gui` builds `MacThermal.app` — a lightweight menu-bar agent (`LSUIElement`,
-no Dock icon) that shows the hottest temperature next to a thermometer icon in
-the menu bar and refreshes every few seconds. Clicking it opens a panel with:
+`make gui` builds `MacThermal.app` — a native menu-bar agent and diagnostic
+dashboard (`LSUIElement`, no permanent Dock icon). The menu bar shows the hottest
+temperature and opens a compact panel; **Open Dashboard** reveals the full app.
 
-- the OS thermal-pressure state (color-coded dot),
+The Pro dashboard adds:
+
+- local temperature and fan history with native Swift Charts,
+- an automatic thermal timeline for threshold crossings, pressure escalation,
+  and recovery,
+- configurable sustained-temperature and OS thermal-pressure notifications,
+- throttling detection based on macOS' reported thermal-pressure state,
+- CPU/process correlation to identify likely heat contributors,
+- current-vs-previous and incident start-vs-end comparisons,
+- a manual recorder plus automatic incident capture for serious/critical macOS
+  pressure or a sustained hotspot above the configured threshold,
+- renameable incident recordings for workloads and symptoms,
+- standalone, dark-mode HTML diagnostic reports with privacy-safe system
+  context, plus detailed CSV sample exports.
+
+All history and incidents stay under `~/Library/Application Support/MacThermal`.
+Automatic recordings stop only after a configurable recovery period, once
+pressure is clear and the hotspot is below a recovery margin, so a brief
+fluctuation does not split one thermal episode into several files. Each one
+also includes up to two minutes of pre-trigger history to preserve the lead-up.
+Reports include the Mac model identifier, macOS version, architecture, memory,
+and logical core count, but never the serial number, account name, or computer
+name.
+Process correlation is presented as investigative evidence, not proof of
+causation. No network service or third-party dependency is used.
+
+The compact menu panel includes:
+
+- a configurable menu-bar reading for the hottest sensor, CPU, or GPU,
+- the OS thermal-pressure and throttling state,
 - the hottest temperature per component (CPU / GPU / memory / battery / …),
 - per-fan RPM with a utilization bar,
-- the overall hotspot,
-- the °C/°F unit toggle and an **Open at Login** checkbox, plus Refresh / Quit.
+- incident recording, dashboard, settings, refresh, and launch-at-login controls.
 
 The **Open at Login** checkbox registers the app as a login item via the modern
 `SMAppService` API (macOS 13+) — no helper bundle, nothing to configure by hand.
 
-It shares the exact same SMC reader as the CLI (`Sources/Sensors.swift`); the
+It shares the exact same SMC reader as the CLI (`Sources/MacThermalCore/Sensors.swift`); the
 IOKit connection is isolated in an `actor` so all sensor reads happen off the
 main thread and only immutable snapshots reach SwiftUI.
 
