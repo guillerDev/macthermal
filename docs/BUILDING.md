@@ -68,7 +68,7 @@ Artifacts (`macthermal`, `macthermal-gui`, `MacThermal.app`) are gitignored.
 swift build                       # build every target into .build/
 swift run macthermal              # run the CLI
 swift run macthermal --json       # …with arguments
-swift run macthermalTests         # run the logic tests (prints "44/44 passed")
+swift run macthermalTests         # run the logic tests (prints the pass count)
 ```
 
 Targets: a `MacThermalCore` library plus `macthermal`, `macthermal-gui`, and

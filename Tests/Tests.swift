@@ -11,6 +11,7 @@ import MacThermalCore
 // it prints a summary and exits non-zero if any check fails (CI-friendly).
 
 @main
+@MainActor
 struct Tests {
     static var checks = 0
     static var failures = 0
@@ -40,6 +41,35 @@ struct Tests {
 
     static func value(_ type: String, _ b: [UInt8]) -> SMCValue {
         SMCValue(key: "TEST", type: type, size: UInt32(b.count), bytes: bytes(b))
+    }
+
+    static func sample(
+        seconds: TimeInterval,
+        hotspot: Double,
+        fan: Double = 20,
+        severity: Severity = .ok,
+        processCPU: Double = 0
+    ) -> ThermalSample {
+        let processes = processCPU > 0
+            ? [ProcessUsage(pid: 42, name: "RenderApp", cpuPercent: processCPU)]
+            : []
+        let stateName: String
+        switch severity {
+        case .warn: stateName = "serious"
+        case .critical: stateName = "critical"
+        default: stateName = "nominal"
+        }
+        return ThermalSample(
+            timestamp: Date(timeIntervalSince1970: seconds),
+            hottestCelsius: hotspot,
+            averageCelsius: hotspot - 10,
+            categoryPeaks: ["CPU": hotspot],
+            fanRPM: [2_000],
+            fanUtilization: [fan],
+            thermalStateName: stateName,
+            thermalSeverity: severity,
+            topProcesses: processes
+        )
     }
 
     static func main() {
@@ -80,6 +110,286 @@ struct Tests {
         expect(fanLevel(49).label == "low", "fanLevel 49 = low")
         expect(fanLevel(50).label == "elevated", "fanLevel 50 = elevated")
         expect(fanLevel(90).label == "maxing", "fanLevel 90 = maxing")
+
+        // --- Pro history summaries and before/after comparison ---
+        let baselineSamples = [
+            sample(seconds: 0, hotspot: 60, fan: 10),
+            sample(seconds: 10, hotspot: 70, fan: 20),
+        ]
+        let currentSamples = [
+            sample(seconds: 20, hotspot: 75, fan: 30),
+            sample(seconds: 30, hotspot: 85, fan: 40, severity: .warn),
+        ]
+        let baselineSummary = ThermalSummary(samples: baselineSamples)
+        eq(baselineSummary.averageHotspotCelsius, 65, "history average hotspot = 65°C")
+        eq(baselineSummary.averageFanUtilization, 15, "history average fan utilization = 15%")
+        let comparison = ThermalComparison(baselineSamples: baselineSamples, currentSamples: currentSamples)
+        eq(comparison.hotspotDeltaCelsius, 15, "comparison hotspot delta = +15°C")
+        expect(comparison.current.pressureSampleCount == 1, "comparison counts serious pressure samples")
+
+        // --- chart density reduction preserves chronology and thermal peaks ---
+        let denseSamples = (0..<2_500).map { index in
+            sample(
+                seconds: TimeInterval(index),
+                hotspot: index == 1_234 ? 112 : 60 + Double(index % 8)
+            )
+        }
+        let reducedSamples = ThermalSampleDownsampler.samples(from: denseSamples, maximumCount: 100)
+        expect(reducedSamples.count <= 100, "chart downsampling honors its maximum count")
+        expect(reducedSamples.first?.id == denseSamples.first?.id, "chart downsampling preserves the first sample")
+        expect(reducedSamples.last?.id == denseSamples.last?.id, "chart downsampling preserves the last sample")
+        expect(reducedSamples.contains { $0.hottestCelsius == 112 }, "chart downsampling preserves a hotspot spike")
+        expect(zip(reducedSamples, reducedSamples.dropFirst()).allSatisfy { pair in
+            pair.0.timestamp < pair.1.timestamp
+        },
+               "chart downsampling preserves chronological order")
+        let threeSamples = ThermalSampleDownsampler.samples(from: denseSamples, maximumCount: 3)
+        expect(threeSamples.count == 3 && threeSamples[1].hottestCelsius == 112,
+               "three-point downsampling keeps the hottest interior sample")
+
+        // --- process/heat correlation ---
+        let correlationSamples = [
+            sample(seconds: 0, hotspot: 50, processCPU: 10),
+            sample(seconds: 10, hotspot: 60, processCPU: 20),
+            sample(seconds: 20, hotspot: 70, processCPU: 30),
+            sample(seconds: 30, hotspot: 80, processCPU: 40),
+        ]
+        let correlations = ThermalAnalytics.processCorrelations(samples: correlationSamples)
+        expect(correlations.first?.processName == "RenderApp", "correlation identifies sampled process")
+        eq(correlations.first?.coefficient, 1, "perfect process/temperature correlation = 1")
+
+        let sparseCorrelationSamples = [
+            sample(seconds: 0, hotspot: 50, processCPU: 10),
+            sample(seconds: 10, hotspot: 60),
+            sample(seconds: 20, hotspot: 70, processCPU: 30),
+            sample(seconds: 30, hotspot: 80, processCPU: 40),
+        ]
+        let sparseCorrelations = ThermalAnalytics.processCorrelations(samples: sparseCorrelationSamples)
+        expect(sparseCorrelations.first?.samplesObserved == 3, "correlation counts only samples where a process appears")
+        eq(sparseCorrelations.first?.averageCPUPercent, 20, "correlation treats an absent process as 0% CPU")
+
+        // --- persisted samples and diagnostic report rendering ---
+        if let encoded = try? JSONEncoder().encode(correlationSamples[0]),
+           let decoded = try? JSONDecoder().decode(ThermalSample.self, from: encoded) {
+            expect(decoded == correlationSamples[0], "thermal sample survives Codable round-trip")
+        } else {
+            expect(false, "thermal sample encodes and decodes")
+        }
+        let csvReport = DiagnosticReportRenderer.csv(samples: correlationSamples)
+        expect(csvReport.hasPrefix("timestamp,hotspot_c"), "CSV report has stable header")
+        expect(csvReport.contains("cpu_peak_c,gpu_peak_c"), "CSV report exposes component peaks")
+        expect(csvReport.contains("top_process_cpu_percent"), "CSV report includes top-process CPU")
+        expect(csvReport.contains("RenderApp"), "CSV report includes top process")
+        let htmlReport = DiagnosticReportRenderer.html(title: "Heat <test>", samples: correlationSamples)
+        expect(htmlReport.contains("Heat &lt;test&gt;"), "HTML report escapes its title")
+        expect(htmlReport.contains("Likely contributors"), "HTML report includes contributor section")
+        let context = DiagnosticContext(
+            hardwareModel: "Mac <Test>",
+            operatingSystem: "macOS Test",
+            architecture: "arm64",
+            processorCount: 8,
+            physicalMemoryBytes: 16 * 1_024 * 1_024 * 1_024,
+            appVersion: "0.5.0"
+        )
+        let contextualReport = DiagnosticReportRenderer.html(
+            title: "Diagnostic",
+            samples: correlationSamples,
+            context: context
+        )
+        expect(contextualReport.contains("System context"), "HTML report includes system context")
+        expect(contextualReport.contains("Mac &lt;Test&gt;"), "HTML report escapes hardware model")
+
+        // --- throttling assessment uses OS pressure before temperature inference ---
+        let nominalState = ThermalState(name: "nominal", note: "", severity: .ok)
+        let seriousState = ThermalState(name: "serious", note: "", severity: .warn)
+        expect(ThrottleAssessment(hottestCelsius: 70, thermalState: nominalState).level == .normal,
+               "nominal pressure and 70°C = no throttling")
+        expect(ThrottleAssessment(hottestCelsius: 95, thermalState: nominalState).level == .elevated,
+               "nominal pressure and 95°C = throttling risk")
+        expect(ThrottleAssessment(hottestCelsius: 70, thermalState: seriousState).level == .active,
+               "serious OS pressure = active throttling")
+
+        // --- sustained alert timing, pressure edge, and cooldown ---
+        let alertConfiguration = AlertConfiguration(
+            enabled: true,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            cooldown: 300,
+            notifyOnThermalPressure: true
+        )
+        var evaluator = ThermalAlertEvaluator()
+        expect(evaluator.evaluate(
+            sample: sample(seconds: 0, hotspot: 92),
+            configuration: alertConfiguration,
+            now: Date(timeIntervalSince1970: 0)
+        ) == nil, "hot alert waits for sustained duration")
+        expect(evaluator.evaluate(
+            sample: sample(seconds: 60, hotspot: 93),
+            configuration: alertConfiguration,
+            now: Date(timeIntervalSince1970: 60)
+        ) == .sustainedTemperature(celsius: 93), "hot alert fires after sustained duration")
+        expect(evaluator.evaluate(
+            sample: sample(seconds: 70, hotspot: 94),
+            configuration: alertConfiguration,
+            now: Date(timeIntervalSince1970: 70)
+        ) == nil, "alert cooldown suppresses repeats")
+
+        var pressureEvaluator = ThermalAlertEvaluator()
+        expect(pressureEvaluator.evaluate(
+            sample: sample(seconds: 0, hotspot: 70, severity: .warn),
+            configuration: alertConfiguration,
+            now: Date(timeIntervalSince1970: 0)
+        ) == .thermalPressure(state: "serious"), "pressure alert fires on serious transition")
+
+        // --- automatic pressure incidents and delayed recovery ---
+        var incidentDetector = AutomaticIncidentDetector()
+        expect(incidentDetector.evaluate(
+            sample: sample(seconds: 0, hotspot: 82, severity: .warn),
+            pressureEnabled: true,
+            temperatureEnabled: false,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 0)
+        ) == .start(trigger: .automaticThermalPressure, state: "serious", severity: .warn),
+               "serious pressure starts an automatic incident")
+        expect(incidentDetector.evaluate(
+            sample: sample(seconds: 10, hotspot: 70),
+            pressureEnabled: true,
+            temperatureEnabled: false,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 10)
+        ) == nil, "automatic incident waits through recovery grace period")
+        expect(incidentDetector.evaluate(
+            sample: sample(seconds: 70, hotspot: 68),
+            pressureEnabled: true,
+            temperatureEnabled: false,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 70)
+        ) == .stop, "automatic incident stops after sustained recovery")
+
+        var disabledDetector = AutomaticIncidentDetector()
+        _ = disabledDetector.evaluate(
+            sample: sample(seconds: 0, hotspot: 82, severity: .critical),
+            pressureEnabled: true,
+            temperatureEnabled: false,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 0)
+        )
+        expect(disabledDetector.evaluate(
+            sample: sample(seconds: 1, hotspot: 82, severity: .critical),
+            pressureEnabled: false,
+            temperatureEnabled: false,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 1)
+        ) == .stop, "disabling automatic capture stops its active incident")
+
+        var hotIncidentDetector = AutomaticIncidentDetector()
+        expect(hotIncidentDetector.evaluate(
+            sample: sample(seconds: 0, hotspot: 92),
+            pressureEnabled: false,
+            temperatureEnabled: true,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 0)
+        ) == nil, "high-temperature incident waits for sustained duration")
+        expect(hotIncidentDetector.evaluate(
+            sample: sample(seconds: 60, hotspot: 93),
+            pressureEnabled: false,
+            temperatureEnabled: true,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 60)
+        ) == .start(trigger: .automaticHighTemperature, state: "nominal", severity: .ok),
+               "sustained high temperature starts an automatic incident even with nominal pressure")
+        expect(hotIncidentDetector.evaluate(
+            sample: sample(seconds: 70, hotspot: 88),
+            pressureEnabled: false,
+            temperatureEnabled: true,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 70)
+        ) == nil, "temperature recovery margin prevents early incident stop")
+        expect(hotIncidentDetector.evaluate(
+            sample: sample(seconds: 80, hotspot: 86),
+            pressureEnabled: false,
+            temperatureEnabled: true,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 80)
+        ) == nil, "temperature incident begins recovery below the hysteresis margin")
+        expect(hotIncidentDetector.evaluate(
+            sample: sample(seconds: 140, hotspot: 85),
+            pressureEnabled: false,
+            temperatureEnabled: true,
+            thresholdCelsius: 90,
+            sustainedDuration: 60,
+            recoveryDuration: 60,
+            now: Date(timeIntervalSince1970: 140)
+        ) == .stop, "temperature incident stops after sustained recovery")
+
+        // --- derived event timeline with threshold hysteresis ---
+        let eventSamples = [
+            sample(seconds: 0, hotspot: 80),
+            sample(seconds: 10, hotspot: 91),
+            sample(seconds: 20, hotspot: 89),
+            sample(seconds: 30, hotspot: 86),
+            sample(seconds: 40, hotspot: 82, severity: .warn),
+            sample(seconds: 50, hotspot: 84, severity: .critical),
+            sample(seconds: 60, hotspot: 72),
+        ]
+        let events = ThermalEventAnalyzer.events(samples: eventSamples, thresholdCelsius: 90)
+        expect(events.map(\.kind) == [
+            .pressureRecovered,
+            .pressureEscalated,
+            .pressureBegan,
+            .temperatureRecovered,
+            .temperatureExceeded,
+        ], "timeline records threshold, pressure escalation, and recovery in newest-first order")
+
+        let preRoll = ThermalIncidentPreRoll.samples(
+            from: eventSamples,
+            endingAt: Date(timeIntervalSince1970: 50),
+            duration: 25
+        )
+        expect(preRoll.map { $0.timestamp.timeIntervalSince1970 } == [30, 40, 50],
+               "automatic incident pre-roll includes only the configured lead-up window")
+
+        // --- incident provenance, renaming, and backward-compatible decoding ---
+        let incident = ThermalIncident(
+            name: "Before",
+            startedAt: Date(timeIntervalSince1970: 0),
+            endedAt: Date(timeIntervalSince1970: 60),
+            samples: eventSamples,
+            trigger: .automaticThermalPressure
+        )
+        let renamedIncident = incident.renamed(to: "Export workload")
+        expect(renamedIncident.id == incident.id && renamedIncident.name == "Export workload",
+               "renaming preserves incident identity and samples")
+        if let encodedIncident = try? JSONEncoder().encode(incident),
+           var object = try? JSONSerialization.jsonObject(with: encodedIncident) as? [String: Any] {
+            object.removeValue(forKey: "trigger")
+            if let legacyData = try? JSONSerialization.data(withJSONObject: object),
+               let legacyIncident = try? JSONDecoder().decode(ThermalIncident.self, from: legacyData) {
+                expect(legacyIncident.effectiveTrigger == .manual, "legacy incidents without provenance decode as manual")
+            } else {
+                expect(false, "legacy incident JSON decodes")
+            }
+        } else {
+            expect(false, "incident JSON encodes for compatibility test")
+        }
 
         // --- fan utilization math ---
         eq(FanReading(index: 0, rpm: 2400, min: 1200, max: 6000, target: 0).utilization,

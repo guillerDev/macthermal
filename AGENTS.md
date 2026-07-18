@@ -10,7 +10,9 @@ reads the System Management Controller (SMC) directly via IOKit. It ships two
 front-ends over one shared sensor core:
 
 - a **CLI** (`macthermal`) — summary, `--all`, `--json`, `--watch` dashboard;
-- a **menu-bar app** (`MacThermal.app`) — SwiftUI `MenuBarExtra` agent.
+- a **native diagnostic app** (`MacThermal.app`) — SwiftUI `MenuBarExtra` plus
+  a dashboard for history, alerts, process correlation, comparisons, reports,
+  and incident recording.
 
 Pure Swift. The **`Makefile` + `swiftc` is the source of truth** for builds,
 tests, releases, and Homebrew. A `Package.swift` is committed **only** as an
@@ -54,15 +56,21 @@ use when.
 
 Files are grouped into per-target directories so SwiftPM can model each build
 target as a module (SwiftPM forbids one file belonging to two targets). The
-Makefile just lists the files explicitly, so the layout suits both.
+Makefile collects core and GUI files with scoped wildcards, so a newly split
+SwiftUI view automatically joins the flat build.
 
 | File | Role |
 |------|------|
 | `Sources/MacThermalCore/SMC.swift` | Low-level IOKit layer: the `SMC` class, `SMCValue` decoding, key enumeration + per-connection caches. The ABI-sensitive code. |
 | `Sources/MacThermalCore/Sensors.swift` | **Shared core, UI-agnostic.** Model (`TempReading`, `FanReading`, `ThermalState`, `Snapshot`), `Severity`, threshold functions (`tempLevel`/`fanLevel`), `categorize`, collection (`collectTemps`/`collectFans`). |
+| `Sources/MacThermalCore/Thermal*.swift`, `Process*.swift` | Persistable history/incident models, summaries, comparisons, throttling assessment, alerts, and process/temperature correlation. Pure logic belongs here and is tested without live hardware. |
 | `Sources/MacThermalCore/JSONReport.swift` | `Codable`-based JSON encoder (`renderJSON`), shared by CLI and tests. |
+| `Sources/MacThermalCore/DiagnosticReportRenderer.swift` | Dependency-free HTML and CSV diagnostic report rendering. |
 | `Sources/macthermal/main.swift` | CLI only: arg parsing, ANSI `Palette`, text rendering, entry point. Has top-level code, so it's named `main.swift`. |
-| `Sources/macthermal-gui/MenuBarApp.swift` | GUI only: `SMCReader` actor, `ThermalMonitor` (`@MainActor` `ObservableObject`), SwiftUI views, `@main`. |
+| `Sources/macthermal-gui/MenuBarApp.swift` | GUI composition root and `@main`; individual views, actors, settings, persistence, and monitoring each live in dedicated files beside it. |
+| `Sources/macthermal-gui/ThermalMonitor.swift` | Main-actor presentation state and polling orchestration. It coordinates the isolated SMC/process/history/notification actors. |
+| `Sources/macthermal-gui/Thermal*State.swift`, `AppStatusState.swift` | Narrow SwiftUI observation domains for live readings, stored diagnostics, and app integration. Historical screens must not observe the three-second live sensor path. |
+| `Sources/macthermal-gui/HistoryStore.swift` | Local NDJSON history plus JSON incident persistence under Application Support. |
 | `Tests/Tests.swift` | Standalone test runner (`@main`), no XCTest. |
 | `Package.swift` | SwiftPM manifest (editor/IDE convenience only — see "What this is"). Core is target `MacThermalCore`; `macthermal`, `macthermal-gui`, `macthermalTests` depend on it. |
 | `Resources/Info.plist` | App bundle plist (`LSUIElement`, bundle id, exec name, `CFBundleIconFile`). |
@@ -77,13 +85,32 @@ see `Makefile`: `SHARED`, `CLI_SRC`, `GUI_SRC`, `TEST_SRC`.
 - **One source of truth.** Sensor reading, thresholds, categorization, and the
   data model live in `Sensors.swift`. CLI and GUI must consume it, not
   reimplement it. The CLI maps `Severity` → ANSI (`Palette.paint`); the GUI maps
-  `Severity` → SwiftUI `Color` (`Severity.color` in `MenuBarApp.swift`). Don't
+  `Severity` → SwiftUI `Color` (`Severity.color` in `SeverityColor.swift`). Don't
   push color/formatting concerns down into the sensor layer.
 - **GUI concurrency.** The IOKit connection is non-`Sendable` and lives inside
   the `SMCReader` **actor**, so every read runs off the main thread; only the
   immutable, `Sendable` `Snapshot` crosses back to `@MainActor`. Do not access
   `SMC` from the main actor or a bare `DispatchQueue` closure — that
   reintroduces the data race we deliberately removed.
+- **Adaptive polling.** `ThermalMonitor` uses one-shot timers at utility priority:
+  nine seconds in the background, three while the panel/dashboard is visible,
+  and two during elevated heat or incident recording. Keep visibility signals
+  wired through the views; dashboard visibility comes from
+  `WindowVisibilityObserver` because SwiftUI can keep a closed Window scene
+  mounted. Do not restore a fixed repeating timer or rely only on `onAppear`.
+- **Narrow UI observation.** `ThermalMonitor` coordinates work, while
+  `ThermalLiveState`, `ThermalArchiveState`, and `AppStatusState` publish to
+  SwiftUI independently. Do not collapse these back into one frequently
+  changing object: history charts and analytics should not invalidate on every
+  sensor refresh.
+- **History is append-only NDJSON.** `HistoryStore` appends one independent JSON
+  sample and compacts it at most daily according to retention. Loading and
+  compaction stream lines instead of materializing the encoded file. Keep
+  decoding tolerant of a truncated last line so a crash cannot invalidate
+  earlier data.
+- **Correlation is not causation.** `ThermalAnalytics` correlates sampled CPU
+  percentages with hotspot temperature. UI and reports must keep the disclaimer;
+  never label a process as the definitive cause of heat.
 
 ## Non-obvious gotchas (read before editing the relevant file)
 
@@ -109,16 +136,13 @@ see `Makefile`: `SHARED`, `CLI_SRC`, `GUI_SRC`, `TEST_SRC`.
   build compiles each target as **one module** (shared files recompiled in); SwiftPM
   compiles the shared code as a separate **`MacThermalCore` module** the front-ends
   import. To satisfy both, the core's cross-target API is `public`, and each entry
-  file (`main.swift`, `MenuBarApp.swift`, `Tests.swift`) imports the core behind
+  CLI/tests and each GUI file that consumes core symbols import the core behind
   `#if canImport(MacThermalCore)` — false in the flat build (no such module, symbols
   already in scope), true under SwiftPM/Xcode. Keep new cross-target symbols `public`
   and this guard in place, or one of the two builds breaks.
-- **`Category` collides with AppKit's ObjC `Category` typedef under SwiftPM.** Once
-  the core is a separate module, `import AppKit` also pulls in `objc/runtime.h`'s
-  `Category`, so bare `Category` in `MenuBarApp.swift` is ambiguous (both imported).
-  A guarded `typealias Category = MacThermalCore.Category` pins it. The flat build
-  is unaffected (a same-module `Category` already wins over the import). If you add
-  another AppKit-importing file that names `Category`, it needs the same alias.
+- **`Category` collides with AppKit's ObjC `Category` typedef under SwiftPM.** GUI
+  code that needs the type uses the guarded `ThermalCategory` alias in
+  `TempGroup.swift`; avoid introducing bare `Category` in AppKit-importing files.
 - **`SMCValue.decode` is split into typed statements on purpose.** Keep the
   per-byte reads (`u16be`/`u32be`/`fltLE`) and the divisor lookup as separate,
   explicitly-typed steps. Collapsing them into one inline `|`/`<<` shift-chain or
