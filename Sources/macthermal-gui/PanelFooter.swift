@@ -4,7 +4,7 @@ import SwiftUI
 struct PanelFooter: View {
     let monitor: ThermalMonitor
     @ObservedObject var settings: AppSettings
-    @EnvironmentObject private var archive: ThermalArchiveState
+    @EnvironmentObject private var recording: IncidentRecordingState
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -44,11 +44,11 @@ struct PanelFooter: View {
                     .buttonStyle(.borderedProminent)
                 Spacer()
                 Button(
-                    archive.isRecordingIncident ? "Stop" : "Record",
-                    systemImage: archive.isRecordingIncident ? "stop.circle.fill" : "record.circle",
+                    recording.isRecording ? "Stop" : "Record",
+                    systemImage: recording.isRecording ? "stop.circle.fill" : "record.circle",
                     action: monitor.toggleIncidentRecording
                 )
-                .tint(archive.isRecordingIncident ? .red : .accentColor)
+                .tint(recording.isRecording ? .red : .accentColor)
             }
         }
     }

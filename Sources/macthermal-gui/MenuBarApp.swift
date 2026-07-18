@@ -21,10 +21,16 @@ struct MacThermalApp: App {
             PanelView(monitor: monitor, settings: settings)
                 .environmentObject(monitor.liveState)
                 .environmentObject(monitor.archiveState)
+                .environmentObject(monitor.recordingState)
                 .environmentObject(monitor.statusState)
         } label: {
             MenuBarLabelView(settings: settings)
                 .environmentObject(monitor.liveState)
+                .onAppear {
+                    appDelegate.prepareForTermination = { [weak monitor] in
+                        await monitor?.prepareForTermination()
+                    }
+                }
         }
         .menuBarExtraStyle(.window)
 
@@ -32,6 +38,7 @@ struct MacThermalApp: App {
             DashboardView(monitor: monitor, settings: settings)
                 .environmentObject(monitor.liveState)
                 .environmentObject(monitor.archiveState)
+                .environmentObject(monitor.recordingState)
                 .environmentObject(monitor.statusState)
                 .frame(minWidth: 860, minHeight: 580)
         }

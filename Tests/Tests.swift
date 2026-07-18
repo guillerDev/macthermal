@@ -48,7 +48,8 @@ struct Tests {
         hotspot: Double,
         fan: Double = 20,
         severity: Severity = .ok,
-        processCPU: Double = 0
+        processCPU: Double = 0,
+        processSnapshotID: UUID? = nil
     ) -> ThermalSample {
         let processes = processCPU > 0
             ? [ProcessUsage(pid: 42, name: "RenderApp", cpuPercent: processCPU)]
@@ -68,7 +69,9 @@ struct Tests {
             fanUtilization: [fan],
             thermalStateName: stateName,
             thermalSeverity: severity,
-            topProcesses: processes
+            topProcesses: processes,
+            processSnapshotID: processSnapshotID,
+            processSampledAt: processSnapshotID.map { _ in Date(timeIntervalSince1970: seconds) }
         )
     }
 
@@ -167,6 +170,42 @@ struct Tests {
         let sparseCorrelations = ThermalAnalytics.processCorrelations(samples: sparseCorrelationSamples)
         expect(sparseCorrelations.first?.samplesObserved == 3, "correlation counts only samples where a process appears")
         eq(sparseCorrelations.first?.averageCPUPercent, 20, "correlation treats an absent process as 0% CPU")
+
+        let processCaptureIDs = [UUID(), UUID(), UUID()]
+        var repeatedProcessSamples: [ThermalSample] = []
+        for (capture, id) in processCaptureIDs.enumerated() {
+            for duplicate in 0..<3 {
+                repeatedProcessSamples.append(sample(
+                    seconds: TimeInterval(capture * 15 + duplicate * 2),
+                    hotspot: 50 + Double(capture * 10 + duplicate),
+                    processCPU: 10 + Double(capture * 10),
+                    processSnapshotID: id
+                ))
+            }
+        }
+        let deduplicatedCorrelations = ThermalAnalytics.processCorrelations(samples: repeatedProcessSamples)
+        expect(deduplicatedCorrelations.first?.samplesObserved == 3,
+               "correlation counts one observation per real process capture")
+
+        // --- comparison coverage rejects sparse or incomplete periods ---
+        let completeCoverageSamples = stride(from: 0, through: 3_600, by: 30).map {
+            sample(seconds: TimeInterval($0), hotspot: 65)
+        }
+        let completeCoverage = ThermalPeriodCoverage(
+            samples: completeCoverageSamples,
+            expectedStart: Date(timeIntervalSince1970: 0),
+            expectedEnd: Date(timeIntervalSince1970: 3_600),
+            expectedInterval: 30
+        )
+        eq(completeCoverage.fraction, 1, "continuous samples provide complete comparison coverage")
+        let sparseCoverage = ThermalPeriodCoverage(
+            samples: [completeCoverageSamples[0], completeCoverageSamples[completeCoverageSamples.count - 1]],
+            expectedStart: Date(timeIntervalSince1970: 0),
+            expectedEnd: Date(timeIntervalSince1970: 3_600),
+            expectedInterval: 30
+        )
+        expect(sparseCoverage.fraction < 0.1, "a large gap does not masquerade as complete coverage")
+        eq(comparison.current.pressureFraction, 0.5, "comparison normalizes pressure by sample count")
 
         // --- persisted samples and diagnostic report rendering ---
         if let encoded = try? JSONEncoder().encode(correlationSamples[0]),

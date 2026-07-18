@@ -5,7 +5,8 @@ import Foundation
 public enum ThermalSampleDownsampler {
     public static func samples(
         from samples: [ThermalSample],
-        maximumCount: Int
+        maximumCount: Int,
+        isCancelled: () -> Bool = { false }
     ) -> [ThermalSample] {
         guard maximumCount > 0, !samples.isEmpty else { return [] }
         guard samples.count > maximumCount else { return samples }
@@ -26,6 +27,7 @@ public enum ThermalSampleDownsampler {
         reduced.reserveCapacity(maximumCount)
 
         for bucket in 0..<bucketCount {
+            if bucket.isMultiple(of: 64), isCancelled() { return [] }
             let lower = 1 + Int((Double(bucket) * bucketWidth).rounded(.down))
             let upper = min(
                 lastIndex,
@@ -36,6 +38,7 @@ public enum ThermalSampleDownsampler {
             var minimumIndex = lower
             var maximumIndex = lower
             for index in (lower + 1)..<upper {
+                if index.isMultiple(of: 512), isCancelled() { return [] }
                 if samples[index].hottestCelsius < samples[minimumIndex].hottestCelsius {
                     minimumIndex = index
                 }

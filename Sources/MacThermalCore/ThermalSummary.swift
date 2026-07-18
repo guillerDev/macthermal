@@ -6,6 +6,7 @@ public struct ThermalSummary: Equatable, Sendable {
     public let peakHotspotCelsius: Double
     public let averageFanUtilization: Double
     public let pressureSampleCount: Int
+    public let pressureFraction: Double
 
     public init(samples: [ThermalSample]) {
         sampleCount = samples.count
@@ -14,14 +15,27 @@ public struct ThermalSummary: Equatable, Sendable {
             peakHotspotCelsius = 0
             averageFanUtilization = 0
             pressureSampleCount = 0
+            pressureFraction = 0
             return
         }
 
-        averageHotspotCelsius = samples.map(\.hottestCelsius).reduce(0, +) / Double(samples.count)
-        peakHotspotCelsius = samples.map(\.hottestCelsius).max() ?? 0
-        averageFanUtilization = samples.map(\.averageFanUtilization).reduce(0, +) / Double(samples.count)
-        pressureSampleCount = samples.count {
-            $0.thermalSeverity == .warn || $0.thermalSeverity == .critical
+        var hotspotSum = 0.0
+        var peakHotspot = -Double.infinity
+        var fanSum = 0.0
+        var pressureCount = 0
+        for sample in samples {
+            hotspotSum += sample.hottestCelsius
+            peakHotspot = max(peakHotspot, sample.hottestCelsius)
+            fanSum += sample.averageFanUtilization
+            if sample.thermalSeverity == .warn || sample.thermalSeverity == .critical {
+                pressureCount += 1
+            }
         }
+        let count = Double(samples.count)
+        averageHotspotCelsius = hotspotSum / count
+        peakHotspotCelsius = peakHotspot
+        averageFanUtilization = fanSum / count
+        pressureSampleCount = pressureCount
+        pressureFraction = Double(pressureCount) / count
     }
 }

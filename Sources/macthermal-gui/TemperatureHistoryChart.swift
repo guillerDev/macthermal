@@ -14,6 +14,10 @@ struct TemperatureHistoryChart: View {
     private static let maximumRenderedSamples = 1_000
 
     var body: some View {
+        let baselineCelsius = max(
+            0,
+            (renderedSamples.lazy.map(\.averageCelsius).min() ?? 20) - 5
+        )
         Chart {
             ForEach(renderedSamples) { sample in
                 AreaMark(
@@ -56,37 +60,23 @@ struct TemperatureHistoryChart: View {
         ])
         .chartYAxisLabel(unit.symbol)
         .accessibilityLabel("Temperature history")
-        .task(id: sampleRevision) {
+        .task(id: SampleRevision(samples)) {
             if samples.count <= Self.maximumRenderedSamples {
                 renderedSamples = samples
                 return
             }
 
-            renderedSamples = []
-            let reduced = await AnalyticsEngine.shared.temperatureChartSamples(
-                samples,
-                maximumCount: Self.maximumRenderedSamples
-            )
-            guard !Task.isCancelled else { return }
-            renderedSamples = reduced
+            do {
+                let reduced = try await AnalyticsEngine.shared.temperatureChartSamples(
+                    samples,
+                    maximumCount: Self.maximumRenderedSamples
+                )
+                renderedSamples = reduced
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
         }
     }
-
-    private var baselineCelsius: Double {
-        max(0, (renderedSamples.map(\.averageCelsius).min() ?? 20) - 5)
-    }
-
-    private var sampleRevision: SampleRevision {
-        SampleRevision(
-            count: samples.count,
-            firstID: samples.first?.id,
-            lastID: samples.last?.id
-        )
-    }
-}
-
-private struct SampleRevision: Hashable {
-    let count: Int
-    let firstID: UUID?
-    let lastID: UUID?
 }

@@ -7,7 +7,7 @@ struct ComparisonView: View {
     @ObservedObject var settings: AppSettings
     @EnvironmentObject private var archive: ThermalArchiveState
     @State private var range: HistoryRange = .oneHour
-    @State private var comparison: ThermalComparison?
+    @State private var analysis: ComparisonAnalysis?
 
     private let columns = [GridItem(.adaptive(minimum: 210), spacing: DesignMetrics.standardSpacing)]
 
@@ -17,20 +17,20 @@ struct ComparisonView: View {
                 Picker("Period", selection: $range) {
                     ForEach(HistoryRange.allCases) { range in
                         Text(range.title).tag(range)
+                            .disabled(!range.supportsComparison(retentionDays: settings.retentionDays))
                     }
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
                 Spacer()
-                Text("Current period vs previous period")
+                Text(coverageLabel)
                     .foregroundStyle(.secondary)
             }
             .padding()
             Divider()
 
-            if let comparison,
-               comparison.baseline.sampleCount > 0,
-               comparison.current.sampleCount > 0 {
+            if let analysis, analysis.isReliable {
+                let comparison = analysis.comparison
                 ScrollView {
                     VStack(alignment: .leading, spacing: DesignMetrics.sectionSpacing) {
                         LazyVGrid(columns: columns, spacing: DesignMetrics.standardSpacing) {
@@ -59,11 +59,11 @@ struct ComparisonView: View {
                                 systemImage: "fan"
                             )
                             ComparisonMetricCard(
-                                title: "Thermal pressure",
-                                baseline: String(comparison.baseline.pressureSampleCount),
-                                current: String(comparison.current.pressureSampleCount),
-                                delta: signedCount(comparison.current.pressureSampleCount - comparison.baseline.pressureSampleCount),
-                                improved: comparison.current.pressureSampleCount <= comparison.baseline.pressureSampleCount,
+                                title: "Thermal pressure rate",
+                                baseline: percent(comparison.baseline.pressureFraction * 100),
+                                current: percent(comparison.current.pressureFraction * 100),
+                                delta: signedPercent(comparison.pressureFractionDelta * 100),
+                                improved: comparison.pressureFractionDelta <= 0,
                                 systemImage: "gauge.with.dots.needle.67percent"
                             )
                         }
@@ -73,26 +73,33 @@ struct ComparisonView: View {
                 }
             } else {
                 EmptyStateView(
-                    title: "Two periods are required",
-                    message: "Keep MacThermal running long enough to collect both a current and a previous \(range.title) period.",
+                    title: emptyStateTitle,
+                    message: emptyStateMessage,
                     systemImage: "arrow.left.arrow.right"
                 )
             }
         }
         .navigationTitle("Before & After")
-        .task(id: range) { await updateComparison() }
-        .task(id: archive.history.count) { await updateComparison() }
+        .task(id: analysisRevision) { await updateComparison() }
     }
 
     private func updateComparison() async {
-        let currentEnd = Date.now
-        let result = await AnalyticsEngine.shared.comparison(
-            samples: archive.history,
-            currentEnd: currentEnd,
-            duration: range.duration
-        )
-        guard !Task.isCancelled else { return }
-        comparison = result
+        guard range.supportsComparison(retentionDays: settings.retentionDays) else {
+            analysis = nil
+            return
+        }
+        do {
+            analysis = try await AnalyticsEngine.shared.comparison(
+                samples: archive.history,
+                currentEnd: .now,
+                duration: range.duration,
+                expectedInterval: settings.historyInterval
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
     }
 
     private func temperatureDelta(_ value: Double) -> String {
@@ -108,7 +115,32 @@ struct ComparisonView: View {
         "\(value >= 0 ? "+" : "")\(value.formatted(.number.precision(.fractionLength(0))))%"
     }
 
-    private func signedCount(_ value: Int) -> String {
-        value >= 0 ? "+\(value)" : String(value)
+    private var analysisRevision: ComparisonAnalysisRevision {
+        ComparisonAnalysisRevision(
+            range: range,
+            samples: SampleRevision(archive.history),
+            historyInterval: settings.historyInterval,
+            retentionDays: settings.retentionDays
+        )
+    }
+
+    private var coverageLabel: String {
+        guard let analysis else { return "Current period vs previous period" }
+        let previous = Int((analysis.baselineCoverage.fraction * 100).rounded())
+        let current = Int((analysis.currentCoverage.fraction * 100).rounded())
+        return "Coverage: previous \(previous)% · current \(current)%"
+    }
+
+    private var emptyStateTitle: String {
+        range.supportsComparison(retentionDays: settings.retentionDays)
+            ? "Complete periods are required"
+            : "Retention is too short"
+    }
+
+    private var emptyStateMessage: String {
+        if !range.supportsComparison(retentionDays: settings.retentionDays) {
+            return "A \(range.title) comparison requires at least two complete periods. Increase history retention in Settings or choose a shorter range."
+        }
+        return "MacThermal requires at least 80% observed coverage in both periods. Keep it running longer or choose a shorter range."
     }
 }

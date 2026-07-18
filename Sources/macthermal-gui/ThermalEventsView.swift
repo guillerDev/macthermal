@@ -39,20 +39,29 @@ struct ThermalEventsView: View {
             }
         }
         .navigationTitle("Thermal Timeline")
-        .task(id: range) { await updateEvents() }
-        .task(id: archive.history.count) { await updateEvents() }
-        .task(id: settings.alertThresholdCelsius) { await updateEvents() }
+        .task(id: analysisRevision) { await updateEvents() }
     }
 
     private func updateEvents() async {
-        let cutoff = Date.now.addingTimeInterval(-range.duration)
-        let samples = await AnalyticsEngine.shared.recentSamples(archive.history, since: cutoff)
-        guard !Task.isCancelled else { return }
-        let result = await AnalyticsEngine.shared.events(
-            samples,
+        do {
+            let cutoff = Date.now.addingTimeInterval(-range.duration)
+            let samples = try await AnalyticsEngine.shared.recentSamples(archive.history, since: cutoff)
+            events = try await AnalyticsEngine.shared.events(
+                samples,
+                thresholdCelsius: settings.alertThresholdCelsius
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
+    }
+
+    private var analysisRevision: EventAnalysisRevision {
+        EventAnalysisRevision(
+            range: range,
+            samples: SampleRevision(archive.history),
             thresholdCelsius: settings.alertThresholdCelsius
         )
-        guard !Task.isCancelled else { return }
-        events = result
     }
 }

@@ -3,7 +3,7 @@ import SwiftUI
 struct DashboardView: View {
     let monitor: ThermalMonitor
     @ObservedObject var settings: AppSettings
-    @EnvironmentObject private var archive: ThermalArchiveState
+    @EnvironmentObject private var recording: IncidentRecordingState
     @EnvironmentObject private var status: AppStatusState
     @State private var selection: DashboardSection? = .overview
 
@@ -23,11 +23,11 @@ struct DashboardView: View {
                 Button("Refresh", systemImage: "arrow.clockwise", action: monitor.refresh)
                     .keyboardShortcut("r")
                 Button(
-                    archive.isRecordingIncident ? "Stop Incident" : "Record Incident",
-                    systemImage: archive.isRecordingIncident ? "stop.circle.fill" : "record.circle",
+                    recording.isRecording ? "Stop Incident" : "Record Incident",
+                    systemImage: recording.isRecording ? "stop.circle.fill" : "record.circle",
                     action: monitor.toggleIncidentRecording
                 )
-                .foregroundStyle(archive.isRecordingIncident ? .red : .primary)
+                .foregroundStyle(recording.isRecording ? .red : .primary)
             }
         }
         .alert(item: $status.presentedError) { error in

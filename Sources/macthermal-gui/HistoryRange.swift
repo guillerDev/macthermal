@@ -1,6 +1,6 @@
 import Foundation
 
-enum HistoryRange: String, CaseIterable, Identifiable {
+enum HistoryRange: String, CaseIterable, Hashable, Identifiable, Sendable {
     case fifteenMinutes
     case oneHour
     case sixHours
@@ -27,5 +27,9 @@ enum HistoryRange: String, CaseIterable, Identifiable {
         case .twentyFourHours: 24 * 60 * 60
         case .sevenDays: 7 * 24 * 60 * 60
         }
+    }
+
+    func supportsComparison(retentionDays: Int) -> Bool {
+        duration * 2 <= TimeInterval(retentionDays) * 24 * 60 * 60
     }
 }

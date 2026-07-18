@@ -2,15 +2,15 @@ import SwiftUI
 
 struct IncidentRecordingHeader: View {
     let monitor: ThermalMonitor
-    @EnvironmentObject private var archive: ThermalArchiveState
+    @EnvironmentObject private var recording: IncidentRecordingState
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignMetrics.standardSpacing) {
-            if archive.isRecordingIncident {
+            if recording.isRecording {
                 Label(recordingTitle, systemImage: "record.circle.fill")
                     .foregroundStyle(.red)
-                if let startedAt = archive.incidentStartedAt {
-                    Text("Started \(startedAt, format: .dateTime.hour().minute().second()) · \(archive.incidentSampleCount) samples")
+                if let startedAt = recording.startedAt {
+                    Text("Started \(startedAt, format: .dateTime.hour().minute().second()) · \(recording.sampleCount) samples")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -29,7 +29,7 @@ struct IncidentRecordingHeader: View {
     }
 
     private var recordingTitle: String {
-        switch archive.recordingTrigger {
+        switch recording.trigger {
         case .automaticThermalPressure: "Automatically recording thermal pressure"
         case .automaticHighTemperature: "Automatically recording high temperature"
         default: "Recording incident"

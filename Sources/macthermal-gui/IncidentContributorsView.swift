@@ -31,10 +31,14 @@ struct IncidentContributorsView: View {
                 .padding(.vertical, DesignMetrics.compactSpacing)
             }
         }
-        .task(id: samples.count) {
-            let result = await AnalyticsEngine.shared.processCorrelations(samples)
-            guard !Task.isCancelled else { return }
-            correlations = result
+        .task(id: SampleRevision(samples)) {
+            do {
+                correlations = try await AnalyticsEngine.shared.processCorrelations(samples)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
         }
     }
 }

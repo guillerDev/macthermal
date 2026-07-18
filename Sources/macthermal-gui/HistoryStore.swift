@@ -7,10 +7,15 @@ actor HistoryStore {
     private let directory: URL
     private let historyURL: URL
     private let incidentsURL: URL
+    private let activeIncidentURL: URL
+    private let activeIncidentMetadataURL: URL
     private let pruneStampURL: URL
     private var lastPruneAt: Date?
     private var latestIncidentRevision = 0
+    private var activeIncidentHandle: FileHandle?
+    private var activeWritesSinceSync = 0
     private let pruneInterval: TimeInterval = 24 * 60 * 60
+    private let activeSyncInterval = 5
 
     init() {
         let directory = URL.applicationSupportDirectory.appending(path: "MacThermal", directoryHint: .isDirectory)
@@ -18,35 +23,61 @@ actor HistoryStore {
         self.directory = directory
         historyURL = directory.appending(path: "history.ndjson")
         incidentsURL = directory.appending(path: "incidents.json")
+        activeIncidentURL = directory.appending(path: "active-incident.ndjson")
+        activeIncidentMetadataURL = directory.appending(path: "active-incident.json")
         self.pruneStampURL = pruneStampURL
         lastPruneAt = Self.loadPruneDate(from: pruneStampURL)
     }
 
-    func load(retentionDays: Int) -> (samples: [ThermalSample], incidents: [ThermalIncident]) {
+    func load(
+        retentionDays: Int,
+        inMemoryDays: Int,
+        incidentRetentionDays: Int,
+        maximumStoredIncidents: Int
+    ) -> (samples: [ThermalSample], incidents: [ThermalIncident]) {
         createDirectoryIfNeeded()
-        let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: .now) ?? .distantPast
+        let historyCutoff = Calendar.current.date(byAdding: .day, value: -inMemoryDays, to: .now) ?? .distantPast
         let decoder = JSONDecoder()
+        let samples = (try? loadSamples(from: historyURL, since: historyCutoff, decoder: decoder)) ?? []
 
-        let samples = (try? loadSamples(since: cutoff, decoder: decoder)) ?? []
-
-        let incidents = (try? Data(contentsOf: incidentsURL))
+        var incidents = (try? Data(contentsOf: incidentsURL))
             .flatMap { try? decoder.decode([ThermalIncident].self, from: $0) } ?? []
-        return (samples, incidents.sorted { $0.startedAt > $1.startedAt })
+        incidents.sort { $0.startedAt > $1.startedAt }
+
+        if let recovered = recoverActiveIncident(decoder: decoder) {
+            if !incidents.contains(where: { $0.id == recovered.id }) {
+                incidents.insert(recovered, at: 0)
+            }
+            if (try? writeIncidents(incidents)) != nil {
+                clearActiveIncidentFiles()
+            }
+        }
+
+        let countBeforeRetention = incidents.count
+        let incidentCutoff = Calendar.current.date(
+            byAdding: .day,
+            value: -incidentRetentionDays,
+            to: .now
+        ) ?? .distantPast
+        incidents.removeAll { $0.endedAt < incidentCutoff }
+        let incidentLimit = max(1, maximumStoredIncidents)
+        if incidents.count > incidentLimit {
+            incidents.removeLast(incidents.count - incidentLimit)
+        }
+        if incidents.count != countBeforeRetention {
+            try? writeIncidents(incidents)
+        }
+
+        // Disk retention remains independent from the smaller in-memory window.
+        if lastPruneAt == nil {
+            try? prune(retentionDays: retentionDays)
+        }
+        return (samples, incidents)
     }
 
     func append(_ sample: ThermalSample, retentionDays: Int) throws {
         createDirectoryIfNeeded()
-        var data = try JSONEncoder().encode(sample)
-        data.append(0x0A)
-
-        if FileManager.default.fileExists(atPath: historyURL.path) {
-            let handle = try FileHandle(forWritingTo: historyURL)
-            try handle.seekToEnd()
-            try handle.write(contentsOf: data)
-            try handle.close()
-        } else {
-            try data.write(to: historyURL, options: .atomic)
-        }
+        try appendEncoded(sample, to: historyURL)
 
         if lastPruneAt.map({ Date.now.timeIntervalSince($0) >= pruneInterval }) ?? true {
             try prune(retentionDays: retentionDays)
@@ -56,13 +87,73 @@ actor HistoryStore {
         }
     }
 
-    func saveIncidents(_ incidents: [ThermalIncident], revision: Int) throws {
+    func beginActiveIncident(
+        id: UUID,
+        name: String,
+        startedAt: Date,
+        trigger: ThermalIncidentTrigger,
+        samples: [ThermalSample]
+    ) throws {
+        createDirectoryIfNeeded()
+        try closeActiveIncidentHandle()
+        let metadata = ActiveIncidentMetadata(
+            id: id,
+            name: name,
+            startedAt: startedAt,
+            trigger: trigger
+        )
+        try JSONEncoder().encode(metadata).write(to: activeIncidentMetadataURL, options: .atomic)
+
+        var data = Data()
+        let encoder = JSONEncoder()
+        for sample in samples {
+            data.append(try encoder.encode(sample))
+            data.append(0x0A)
+        }
+        try data.write(to: activeIncidentURL, options: .atomic)
+        activeIncidentHandle = try FileHandle(forWritingTo: activeIncidentURL)
+        try activeIncidentHandle?.seekToEnd()
+        activeWritesSinceSync = 0
+    }
+
+    func appendActiveIncident(_ sample: ThermalSample) throws {
+        guard FileManager.default.fileExists(atPath: activeIncidentMetadataURL.path) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        if activeIncidentHandle == nil {
+            activeIncidentHandle = try FileHandle(forWritingTo: activeIncidentURL)
+            try activeIncidentHandle?.seekToEnd()
+        }
+        var data = try JSONEncoder().encode(sample)
+        data.append(0x0A)
+        try activeIncidentHandle?.write(contentsOf: data)
+        activeWritesSinceSync += 1
+        if activeWritesSinceSync >= activeSyncInterval {
+            try activeIncidentHandle?.synchronize()
+            activeWritesSinceSync = 0
+        }
+    }
+
+    func saveIncidents(
+        _ incidents: [ThermalIncident],
+        revision: Int,
+        clearActiveIncident: Bool = false
+    ) throws {
         guard revision >= latestIncidentRevision else { return }
         createDirectoryIfNeeded()
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(incidents).write(to: incidentsURL, options: .atomic)
+        if clearActiveIncident { try flushActiveIncident() }
+        try writeIncidents(incidents)
         latestIncidentRevision = revision
+        if clearActiveIncident { clearActiveIncidentFiles() }
+    }
+
+    func flushActiveIncident() throws {
+        try activeIncidentHandle?.synchronize()
+        activeWritesSinceSync = 0
+    }
+
+    func discardActiveIncident() {
+        clearActiveIncidentFiles()
     }
 
     func clearHistory() throws {
@@ -72,6 +163,54 @@ actor HistoryStore {
     }
 
     nonisolated var storageDirectory: URL { directory }
+
+    private func writeIncidents(_ incidents: [ThermalIncident]) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(incidents).write(to: incidentsURL, options: .atomic)
+    }
+
+    private func recoverActiveIncident(decoder: JSONDecoder) -> ThermalIncident? {
+        guard let metadataData = try? Data(contentsOf: activeIncidentMetadataURL),
+              let metadata = try? decoder.decode(ActiveIncidentMetadata.self, from: metadataData),
+              let samples = try? loadSamples(from: activeIncidentURL, since: .distantPast, decoder: decoder),
+              let lastSample = samples.last else { return nil }
+        return ThermalIncident(
+            id: metadata.id,
+            name: metadata.name + " (recovered)",
+            startedAt: metadata.startedAt,
+            endedAt: lastSample.timestamp,
+            samples: samples,
+            trigger: metadata.trigger
+        )
+    }
+
+    private func clearActiveIncidentFiles() {
+        try? closeActiveIncidentHandle()
+        try? FileManager.default.removeItem(at: activeIncidentURL)
+        try? FileManager.default.removeItem(at: activeIncidentMetadataURL)
+        activeWritesSinceSync = 0
+    }
+
+    private func closeActiveIncidentHandle() throws {
+        guard let activeIncidentHandle else { return }
+        try activeIncidentHandle.synchronize()
+        try activeIncidentHandle.close()
+        self.activeIncidentHandle = nil
+    }
+
+    private func appendEncoded<T: Encodable>(_ value: T, to url: URL) throws {
+        var data = try JSONEncoder().encode(value)
+        data.append(0x0A)
+        if FileManager.default.fileExists(atPath: url.path) {
+            let handle = try FileHandle(forWritingTo: url)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: data)
+            try handle.close()
+        } else {
+            try data.write(to: url, options: .atomic)
+        }
+    }
 
     private func prune(retentionDays: Int) throws {
         guard FileManager.default.fileExists(atPath: historyURL.path) else { return }
@@ -92,7 +231,7 @@ actor HistoryStore {
 
         let decoder = JSONDecoder()
         let newline = Data([0x0A])
-        try forEachHistoryLine { line in
+        try forEachLine(in: historyURL) { line in
             guard let envelope = try? decoder.decode(TimestampEnvelope.self, from: line),
                   envelope.timestamp >= cutoff else { return }
             try output.write(contentsOf: line)
@@ -108,10 +247,14 @@ actor HistoryStore {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    private func loadSamples(since cutoff: Date, decoder: JSONDecoder) throws -> [ThermalSample] {
-        guard FileManager.default.fileExists(atPath: historyURL.path) else { return [] }
+    private func loadSamples(
+        from url: URL,
+        since cutoff: Date,
+        decoder: JSONDecoder
+    ) throws -> [ThermalSample] {
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
         var samples: [ThermalSample] = []
-        try forEachHistoryLine { line in
+        try forEachLine(in: url) { line in
             guard let sample = try? decoder.decode(ThermalSample.self, from: line),
                   sample.timestamp >= cutoff else { return }
             samples.append(sample)
@@ -129,8 +272,8 @@ actor HistoryStore {
         return try? JSONDecoder().decode(TimestampEnvelope.self, from: line).timestamp
     }
 
-    private func forEachHistoryLine(_ body: (Data) throws -> Void) throws {
-        let input = try FileHandle(forReadingFrom: historyURL)
+    private func forEachLine(in url: URL, _ body: (Data) throws -> Void) throws {
+        let input = try FileHandle(forReadingFrom: url)
         defer { try? input.close() }
         var buffer = Data()
 
@@ -165,4 +308,11 @@ actor HistoryStore {
 
 private struct TimestampEnvelope: Decodable {
     let timestamp: Date
+}
+
+private struct ActiveIncidentMetadata: Codable {
+    let id: UUID
+    let name: String
+    let startedAt: Date
+    let trigger: ThermalIncidentTrigger
 }

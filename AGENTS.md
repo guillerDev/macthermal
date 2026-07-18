@@ -69,8 +69,8 @@ SwiftUI view automatically joins the flat build.
 | `Sources/macthermal/main.swift` | CLI only: arg parsing, ANSI `Palette`, text rendering, entry point. Has top-level code, so it's named `main.swift`. |
 | `Sources/macthermal-gui/MenuBarApp.swift` | GUI composition root and `@main`; individual views, actors, settings, persistence, and monitoring each live in dedicated files beside it. |
 | `Sources/macthermal-gui/ThermalMonitor.swift` | Main-actor presentation state and polling orchestration. It coordinates the isolated SMC/process/history/notification actors. |
-| `Sources/macthermal-gui/Thermal*State.swift`, `AppStatusState.swift` | Narrow SwiftUI observation domains for live readings, stored diagnostics, and app integration. Historical screens must not observe the three-second live sensor path. |
-| `Sources/macthermal-gui/HistoryStore.swift` | Local NDJSON history plus JSON incident persistence under Application Support. |
+| `Sources/macthermal-gui/Thermal*State.swift`, `IncidentRecordingState.swift`, `AppStatusState.swift` | Narrow SwiftUI observation domains for live readings, stored diagnostics, two-second recording progress, and app integration. Historical screens must not observe the live sensor or incident-counter paths. |
+| `Sources/macthermal-gui/HistoryStore.swift` | Local NDJSON history, bounded JSON incident persistence, and the recoverable active-incident NDJSON journal under Application Support. |
 | `Tests/Tests.swift` | Standalone test runner (`@main`), no XCTest. |
 | `Package.swift` | SwiftPM manifest (editor/IDE convenience only — see "What this is"). Core is target `MacThermalCore`; `macthermal`, `macthermal-gui`, `macthermalTests` depend on it. |
 | `Resources/Info.plist` | App bundle plist (`LSUIElement`, bundle id, exec name, `CFBundleIconFile`). |
@@ -99,15 +99,23 @@ see `Makefile`: `SHARED`, `CLI_SRC`, `GUI_SRC`, `TEST_SRC`.
   `WindowVisibilityObserver` because SwiftUI can keep a closed Window scene
   mounted. Do not restore a fixed repeating timer or rely only on `onAppear`.
 - **Narrow UI observation.** `ThermalMonitor` coordinates work, while
-  `ThermalLiveState`, `ThermalArchiveState`, and `AppStatusState` publish to
-  SwiftUI independently. Do not collapse these back into one frequently
-  changing object: history charts and analytics should not invalidate on every
-  sensor refresh.
+  `ThermalLiveState`, `ThermalArchiveState`, `IncidentRecordingState`, and
+  `AppStatusState` publish to SwiftUI independently. Do not collapse these back
+  into one frequently changing object: history charts and analytics should not
+  invalidate on every sensor refresh or two-second incident counter update.
 - **History is append-only NDJSON.** `HistoryStore` appends one independent JSON
   sample and compacts it at most daily according to retention. Loading and
   compaction stream lines instead of materializing the encoded file. Keep
   decoding tolerant of a truncated last line so a crash cannot invalidate
   earlier data.
+- **Incident cadence stays separate.** General history always follows the user's
+  15/30/60-second interval. Two-second samples recorded during an incident go to
+  `active-incident.ndjson` and the bounded incident segment only; mixing them
+  into general history biases averages, pressure rates, and comparisons.
+- **Bound long-lived storage.** The UI retains at most the latest 14 days in
+  memory (enough for two seven-day comparison periods), while disk retention can
+  remain longer. Active incidents are journaled incrementally, split at the
+  configured duration, and pruned by age/count after finalization.
 - **Correlation is not causation.** `ThermalAnalytics` correlates sampled CPU
   percentages with hotspot temperature. UI and reports must keep the disclaimer;
   never label a process as the definitive cause of heat.

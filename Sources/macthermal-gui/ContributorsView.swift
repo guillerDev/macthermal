@@ -40,16 +40,22 @@ struct ContributorsView: View {
             }
         }
         .navigationTitle("Likely Contributors")
-        .task(id: range) { await updateCorrelations() }
-        .task(id: archive.history.count) { await updateCorrelations() }
+        .task(id: analysisRevision) { await updateCorrelations() }
     }
 
     private func updateCorrelations() async {
-        let cutoff = Date.now.addingTimeInterval(-range.duration)
-        let samples = await AnalyticsEngine.shared.recentSamples(archive.history, since: cutoff)
-        guard !Task.isCancelled else { return }
-        let result = await AnalyticsEngine.shared.processCorrelations(samples)
-        guard !Task.isCancelled else { return }
-        correlations = result
+        do {
+            let cutoff = Date.now.addingTimeInterval(-range.duration)
+            let samples = try await AnalyticsEngine.shared.recentSamples(archive.history, since: cutoff)
+            correlations = try await AnalyticsEngine.shared.processCorrelations(samples)
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
+    }
+
+    private var analysisRevision: RangedHistoryRevision {
+        RangedHistoryRevision(range: range, samples: SampleRevision(archive.history))
     }
 }
