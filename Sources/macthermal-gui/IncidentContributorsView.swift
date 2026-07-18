@@ -5,23 +5,23 @@ import MacThermalCore
 
 struct IncidentContributorsView: View {
     let samples: [ThermalSample]
-    @State private var correlations: [ProcessCorrelation] = []
+    @State private var contributors: [HeatContributor] = []
 
     var body: some View {
         GroupBox("Likely contributors") {
-            if correlations.isEmpty {
-                Text("No process had enough observations for a useful correlation.")
+            if contributors.isEmpty {
+                Text("Not enough process samples during hot periods to attribute the heat.")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 VStack(spacing: DesignMetrics.standardSpacing) {
-                    ForEach(correlations.prefix(5)) { item in
+                    ForEach(contributors.prefix(5)) { item in
                         LabeledContent {
-                            Text(item.coefficient, format: .number.precision(.fractionLength(2)))
+                            Text("\(item.hotAverageCPUPercent.formatted(.number.precision(.fractionLength(1))))%")
                         } label: {
                             VStack(alignment: .leading) {
                                 Text(item.processName)
-                                Text("Average CPU \(item.averageCPUPercent.formatted(.number.precision(.fractionLength(1))))%")
+                                Text(item.pattern.label)
                                     .font(.callout)
                                     .foregroundStyle(.secondary)
                             }
@@ -33,7 +33,7 @@ struct IncidentContributorsView: View {
         }
         .task(id: SampleRevision(samples)) {
             do {
-                correlations = try await AnalyticsEngine.shared.processCorrelations(samples)
+                contributors = try await AnalyticsEngine.shared.heatContributors(samples)
             } catch is CancellationError {
                 return
             } catch {

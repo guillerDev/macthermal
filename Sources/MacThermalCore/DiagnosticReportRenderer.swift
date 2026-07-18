@@ -31,12 +31,12 @@ public enum DiagnosticReportRenderer {
         context: DiagnosticContext? = nil
     ) -> String {
         let summary = ThermalSummary(samples: samples)
-        let correlations = ThermalAnalytics.processCorrelations(samples: samples).prefix(10)
+        let contributors = ThermalAnalytics.heatContributors(samples: samples).prefix(10)
         let generated = Date.now.formatted(date: .abbreviated, time: .standard)
 
-        let contributorRows = correlations.map { item in
-            "<tr><td>\(htmlEscape(item.processName))</td><td>\(decimal(item.coefficient, digits: 2))</td><td>\(decimal(item.averageCPUPercent, digits: 1))%</td><td>\(item.samplesObserved)</td></tr>"
-        }.joined().nonEmpty ?? "<tr><td colspan=\"4\" class=\"note\">Not enough repeated process observations for a reliable correlation.</td></tr>"
+        let contributorRows = contributors.map { item in
+            "<tr><td>\(htmlEscape(item.processName))</td><td>\(decimal(item.hotAverageCPUPercent, digits: 1))%</td><td>\(decimal(item.peakCPUPercent, digits: 1))%</td><td>\(htmlEscape(item.pattern.label))</td><td>\(item.hotSampleCount)</td></tr>"
+        }.joined().nonEmpty ?? "<tr><td colspan=\"5\" class=\"note\">Not enough process samples during hot periods to attribute the heat.</td></tr>"
 
         let sampleRows = samples.suffix(500).map { sample in
             let process = sample.topProcesses.first
@@ -57,10 +57,10 @@ public enum DiagnosticReportRenderer {
         return """
         <!doctype html><html><head><meta charset="utf-8"><title>\(htmlEscape(title))</title>
         <style>:root{color-scheme:light dark}body{font:14px -apple-system,BlinkMacSystemFont,sans-serif;color:#1d1d1f;background:#fff;max-width:1100px;margin:40px auto;padding:0 24px}h1{font-size:28px}h2{margin-top:32px}section{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.metric{background:#f5f5f7;border-radius:12px;padding:16px}.metric strong{display:block;font-size:24px;margin-top:6px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid #ddd}th{background:#f5f5f7}.note{color:#6e6e73}@media(prefers-color-scheme:dark){body{color:#f5f5f7;background:#1d1d1f}.metric,th{background:#2c2c2e}th,td{border-color:#48484a}.note{color:#aeaeb2}}@media(max-width:700px){section{grid-template-columns:repeat(2,1fr)}body{margin:20px auto;padding:0 12px;overflow-wrap:anywhere}}@media print{body{color:#000;background:#fff;margin:0;max-width:none}.metric,th{background:#f5f5f7}}</style></head>
-        <body><h1>\(htmlEscape(title))</h1><p class="note">Generated \(htmlEscape(generated)) by MacThermal Pro. Process correlation is diagnostic evidence, not proof of causation.</p>
+        <body><h1>\(htmlEscape(title))</h1><p class="note">Generated \(htmlEscape(generated)) by MacThermal Pro. CPU load while hot is diagnostic evidence, not proof of causation.</p>
         <section><div class="metric">Samples<strong>\(summary.sampleCount)</strong></div><div class="metric">Average hotspot<strong>\(decimal(summary.averageHotspotCelsius, digits: 1))°C</strong></div><div class="metric">Peak hotspot<strong>\(decimal(summary.peakHotspotCelsius, digits: 1))°C</strong></div><div class="metric">Pressure samples<strong>\(summary.pressureSampleCount)</strong></div></section>
         \(systemContext)
-        <h2>Likely contributors</h2><table><thead><tr><th>Process</th><th>Correlation</th><th>Average CPU</th><th>Observed</th></tr></thead><tbody>\(contributorRows)</tbody></table>
+        <h2>Likely contributors</h2><table><thead><tr><th>Process</th><th>CPU while hot</th><th>Peak CPU</th><th>Pattern</th><th>Hot samples</th></tr></thead><tbody>\(contributorRows)</tbody></table>
         <h2>Recent samples</h2><table><thead><tr><th>Time</th><th>Hotspot</th><th>Average</th><th>Fan</th><th>Pressure</th><th>Top process</th></tr></thead><tbody>\(sampleRows)</tbody></table></body></html>
         """
     }

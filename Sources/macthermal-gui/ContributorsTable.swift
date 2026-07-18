@@ -4,40 +4,40 @@ import MacThermalCore
 #endif
 
 struct ContributorsTable: View {
-    let correlations: [ProcessCorrelation]
+    let contributors: [HeatContributor]
 
     var body: some View {
-        Table(correlations) {
+        Table(contributors) {
             TableColumn("Process", value: \.processName)
-            TableColumn("Correlation") { item in
-                Label(
-                    item.coefficient.formatted(.number.precision(.fractionLength(2))),
-                    systemImage: correlationSymbol(item.coefficient)
-                )
-                .foregroundStyle(correlationColor(item.coefficient))
-            }
-            TableColumn("Average CPU") { item in
-                Text(item.averageCPUPercent, format: .number.precision(.fractionLength(1)))
+            TableColumn("CPU while hot") { item in
+                Text("\(item.hotAverageCPUPercent.formatted(.number.precision(.fractionLength(1))))%")
             }
             TableColumn("Peak CPU") { item in
-                Text(item.peakCPUPercent, format: .number.precision(.fractionLength(1)))
+                Text("\(item.peakCPUPercent.formatted(.number.precision(.fractionLength(1))))%")
+            }
+            TableColumn("Pattern") { item in
+                Label(item.pattern.label, systemImage: patternSymbol(item.pattern))
+                    .foregroundStyle(patternColor(item.pattern))
+                    .help(item.pattern.detail)
             }
             TableColumn("Samples") { item in
-                Text(item.samplesObserved, format: .number)
+                Text(item.hotSampleCount, format: .number)
             }
         }
         .frame(minHeight: 220)
     }
 
-    private func correlationSymbol(_ value: Double) -> String {
-        if value >= 0.7 { "arrow.up.right.circle.fill" }
-        else if value >= 0.35 { "arrow.up.right.circle" }
-        else { "minus.circle" }
+    private func patternSymbol(_ pattern: ContributionPattern) -> String {
+        switch pattern {
+        case .steadyLoad:        "flame.fill"
+        case .tracksTemperature: "chart.line.uptrend.xyaxis"
+        }
     }
 
-    private func correlationColor(_ value: Double) -> Color {
-        if value >= 0.7 { .orange }
-        else if value >= 0.35 { .yellow }
-        else { .secondary }
+    private func patternColor(_ pattern: ContributionPattern) -> Color {
+        switch pattern {
+        case .steadyLoad:        .orange
+        case .tracksTemperature: .yellow
+        }
     }
 }

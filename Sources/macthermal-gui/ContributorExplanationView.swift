@@ -3,7 +3,7 @@ import SwiftUI
 struct ContributorExplanationView: View {
     var body: some View {
         Label {
-            Text("Correlation compares sampled CPU use with hotspot temperature. A high value is a useful lead, but it does not prove that a process caused the heat.")
+            Text("Ranked by the CPU each process used while your Mac was at its hottest. It's a strong lead, not proof that a process caused the heat. \"Pattern\" says whether a process ran hot steadily or rose and fell with the temperature.")
         } icon: {
             Image(systemName: "info.circle")
         }
