@@ -36,12 +36,20 @@ struct IncidentsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Incident Recorder")
-        .task(id: archive.incidents.count) {
-            if selectedIncidentID == nil { selectedIncidentID = archive.incidents.first?.id }
+        .task(id: incidentIDs) {
+            if let selectedIncidentID,
+               archive.incidents.contains(where: { $0.id == selectedIncidentID }) {
+                return
+            }
+            selectedIncidentID = archive.incidents.first?.id
         }
     }
 
     private var selectedIncident: ThermalIncident? {
         archive.incidents.first { $0.id == selectedIncidentID }
+    }
+
+    private var incidentIDs: [UUID] {
+        archive.incidents.map(\.id)
     }
 }

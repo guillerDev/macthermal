@@ -18,6 +18,9 @@ final class AppSettings: ObservableObject {
     @Published var autoRecordPressureIncidents: Bool { didSet { save(autoRecordPressureIncidents, for: "autoRecordPressureIncidents") } }
     @Published var autoRecordTemperatureIncidents: Bool { didSet { save(autoRecordTemperatureIncidents, for: "autoRecordTemperatureIncidents") } }
     @Published var automaticIncidentRecoverySeconds: TimeInterval { didSet { save(automaticIncidentRecoverySeconds, for: "automaticIncidentRecoverySeconds") } }
+    @Published var maximumIncidentDurationMinutes: Double { didSet { save(maximumIncidentDurationMinutes, for: "maximumIncidentDurationMinutes") } }
+    @Published var incidentRetentionDays: Int { didSet { save(incidentRetentionDays, for: "incidentRetentionDays") } }
+    @Published var maximumStoredIncidents: Int { didSet { save(maximumStoredIncidents, for: "maximumStoredIncidents") } }
 
     private let defaults: UserDefaults
 
@@ -35,6 +38,9 @@ final class AppSettings: ObservableObject {
         autoRecordPressureIncidents = defaults.object(forKey: "autoRecordPressureIncidents") as? Bool ?? true
         autoRecordTemperatureIncidents = defaults.object(forKey: "autoRecordTemperatureIncidents") as? Bool ?? true
         automaticIncidentRecoverySeconds = defaults.object(forKey: "automaticIncidentRecoverySeconds") as? TimeInterval ?? 60
+        maximumIncidentDurationMinutes = defaults.object(forKey: "maximumIncidentDurationMinutes") as? Double ?? 60
+        incidentRetentionDays = defaults.object(forKey: "incidentRetentionDays") as? Int ?? 30
+        maximumStoredIncidents = defaults.object(forKey: "maximumStoredIncidents") as? Int ?? 25
     }
 
     var alertConfiguration: AlertConfiguration {
@@ -45,6 +51,10 @@ final class AppSettings: ObservableObject {
             cooldown: alertCooldownMinutes * 60,
             notifyOnThermalPressure: notifyOnThermalPressure
         )
+    }
+
+    var maximumIncidentDuration: TimeInterval {
+        max(5, maximumIncidentDurationMinutes) * 60
     }
 
     private func save(_ value: Any, for key: String) {

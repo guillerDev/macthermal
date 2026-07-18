@@ -80,6 +80,21 @@ struct SettingsView: View {
                     Text("2 minutes").tag(TimeInterval(120))
                 }
                 .disabled(!settings.autoRecordPressureIncidents && !settings.autoRecordTemperatureIncidents)
+                Picker("Split long recordings every", selection: $settings.maximumIncidentDurationMinutes) {
+                    Text("30 minutes").tag(30.0)
+                    Text("1 hour").tag(60.0)
+                    Text("2 hours").tag(120.0)
+                }
+                Picker("Keep recorded incidents for", selection: $settings.incidentRetentionDays) {
+                    Text("7 days").tag(7)
+                    Text("30 days").tag(30)
+                    Text("90 days").tag(90)
+                }
+                Picker("Maximum recordings", selection: $settings.maximumStoredIncidents) {
+                    Text("10 incidents").tag(10)
+                    Text("25 incidents").tag(25)
+                    Text("50 incidents").tag(50)
+                }
                 Text("Automatic recordings include up to two minutes before the trigger, preserve high-resolution samples through the episode, and stop after sustained recovery.")
                     .font(.callout)
                     .foregroundStyle(.secondary)

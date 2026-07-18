@@ -8,34 +8,94 @@ import MacThermalCore
 actor AnalyticsEngine {
     static let shared = AnalyticsEngine()
 
-    func recentSamples(_ samples: [ThermalSample], since cutoff: Date) -> [ThermalSample] {
-        samples.filter { $0.timestamp >= cutoff }
+    func recentSamples(_ samples: [ThermalSample], since cutoff: Date) throws -> [ThermalSample] {
+        var recent: [ThermalSample] = []
+        recent.reserveCapacity(samples.count)
+        for (index, sample) in samples.enumerated() {
+            if index.isMultiple(of: 256) { try Task.checkCancellation() }
+            if sample.timestamp >= cutoff { recent.append(sample) }
+        }
+        return recent
     }
 
     func temperatureChartSamples(
         _ samples: [ThermalSample],
         maximumCount: Int
-    ) -> [ThermalSample] {
-        ThermalSampleDownsampler.samples(from: samples, maximumCount: maximumCount)
+    ) throws -> [ThermalSample] {
+        try Task.checkCancellation()
+        let result = ThermalSampleDownsampler.samples(
+            from: samples,
+            maximumCount: maximumCount,
+            isCancelled: { Task.isCancelled }
+        )
+        try Task.checkCancellation()
+        return result
     }
 
-    func processCorrelations(_ samples: [ThermalSample]) -> [ProcessCorrelation] {
-        ThermalAnalytics.processCorrelations(samples: samples)
+    func processCorrelations(_ samples: [ThermalSample]) throws -> [ProcessCorrelation] {
+        try Task.checkCancellation()
+        let result = ThermalAnalytics.processCorrelations(
+            samples: samples,
+            isCancelled: { Task.isCancelled }
+        )
+        try Task.checkCancellation()
+        return result
     }
 
-    func events(_ samples: [ThermalSample], thresholdCelsius: Double) -> [ThermalEvent] {
-        ThermalEventAnalyzer.events(samples: samples, thresholdCelsius: thresholdCelsius)
+    func events(_ samples: [ThermalSample], thresholdCelsius: Double) throws -> [ThermalEvent] {
+        try Task.checkCancellation()
+        let result = ThermalEventAnalyzer.events(
+            samples: samples,
+            thresholdCelsius: thresholdCelsius,
+            isCancelled: { Task.isCancelled }
+        )
+        try Task.checkCancellation()
+        return result
     }
 
     func comparison(
         samples: [ThermalSample],
         currentEnd: Date,
-        duration: TimeInterval
-    ) -> ThermalComparison {
+        duration: TimeInterval,
+        expectedInterval: TimeInterval
+    ) throws -> ComparisonAnalysis {
+        try Task.checkCancellation()
         let currentStart = currentEnd.addingTimeInterval(-duration)
         let baselineStart = currentStart.addingTimeInterval(-duration)
-        let baseline = samples.filter { $0.timestamp >= baselineStart && $0.timestamp < currentStart }
-        let current = samples.filter { $0.timestamp >= currentStart && $0.timestamp <= currentEnd }
-        return ThermalComparison(baselineSamples: baseline, currentSamples: current)
+        var baseline: [ThermalSample] = []
+        var current: [ThermalSample] = []
+        for (index, sample) in samples.enumerated() {
+            if index.isMultiple(of: 256) { try Task.checkCancellation() }
+            if sample.timestamp >= baselineStart && sample.timestamp < currentStart {
+                baseline.append(sample)
+            } else if sample.timestamp >= currentStart && sample.timestamp <= currentEnd {
+                current.append(sample)
+            }
+        }
+        return ComparisonAnalysis(
+            comparison: ThermalComparison(baselineSamples: baseline, currentSamples: current),
+            baselineCoverage: ThermalPeriodCoverage(
+                samples: baseline,
+                expectedStart: baselineStart,
+                expectedEnd: currentStart,
+                expectedInterval: expectedInterval
+            ),
+            currentCoverage: ThermalPeriodCoverage(
+                samples: current,
+                expectedStart: currentStart,
+                expectedEnd: currentEnd,
+                expectedInterval: expectedInterval
+            )
+        )
+    }
+}
+
+struct ComparisonAnalysis: Sendable {
+    let comparison: ThermalComparison
+    let baselineCoverage: ThermalPeriodCoverage
+    let currentCoverage: ThermalPeriodCoverage
+
+    var isReliable: Bool {
+        baselineCoverage.fraction >= 0.8 && currentCoverage.fraction >= 0.8
     }
 }

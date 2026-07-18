@@ -38,14 +38,24 @@ struct HistoryView: View {
             }
         }
         .navigationTitle("History")
-        .task(id: range) { await updateSamples() }
-        .task(id: archive.history.count) { await updateSamples() }
+        .task(id: analysisRevision) { await updateSamples() }
     }
 
     private func updateSamples() async {
-        let cutoff = Date.now.addingTimeInterval(-range.duration)
-        let samples = await AnalyticsEngine.shared.recentSamples(archive.history, since: cutoff)
-        guard !Task.isCancelled else { return }
-        displayedSamples = samples
+        do {
+            let cutoff = Date.now.addingTimeInterval(-range.duration)
+            displayedSamples = try await AnalyticsEngine.shared.recentSamples(
+                archive.history,
+                since: cutoff
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
+    }
+
+    private var analysisRevision: RangedHistoryRevision {
+        RangedHistoryRevision(range: range, samples: SampleRevision(archive.history))
     }
 }

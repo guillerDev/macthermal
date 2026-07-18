@@ -8,7 +8,7 @@ struct ComparisonInterpretationView: View {
 
     var body: some View {
         let improved = comparison.hotspotDeltaCelsius <= -2 && comparison.fanDeltaPercent <= 0
-        let regressed = comparison.hotspotDeltaCelsius >= 2 || comparison.current.pressureSampleCount > comparison.baseline.pressureSampleCount
+        let regressed = comparison.hotspotDeltaCelsius >= 2 || comparison.pressureFractionDelta > 0
 
         Label {
             Text(message(improved: improved, regressed: regressed))

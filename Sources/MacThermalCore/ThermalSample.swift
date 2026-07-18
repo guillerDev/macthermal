@@ -14,6 +14,10 @@ public struct ThermalSample: Codable, Equatable, Identifiable, Sendable {
     public let thermalStateName: String
     public let thermalSeverity: Severity
     public let topProcesses: [ProcessUsage]
+    /// Identifies one real process-list capture. Several high-resolution
+    /// temperature samples may share it, but analytics must count it once.
+    public let processSnapshotID: UUID?
+    public let processSampledAt: Date?
 
     public init(
         id: UUID = UUID(),
@@ -25,7 +29,9 @@ public struct ThermalSample: Codable, Equatable, Identifiable, Sendable {
         fanUtilization: [Double],
         thermalStateName: String,
         thermalSeverity: Severity,
-        topProcesses: [ProcessUsage]
+        topProcesses: [ProcessUsage],
+        processSnapshotID: UUID? = nil,
+        processSampledAt: Date? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -37,9 +43,17 @@ public struct ThermalSample: Codable, Equatable, Identifiable, Sendable {
         self.thermalStateName = thermalStateName
         self.thermalSeverity = thermalSeverity
         self.topProcesses = topProcesses
+        self.processSnapshotID = processSnapshotID
+        self.processSampledAt = processSampledAt
     }
 
-    public init(snapshot: Snapshot, processes: [ProcessUsage], timestamp: Date = .now) {
+    public init(
+        snapshot: Snapshot,
+        processes: [ProcessUsage],
+        processSnapshotID: UUID? = nil,
+        processSampledAt: Date? = nil,
+        timestamp: Date = .now
+    ) {
         var peaks: [String: Double] = [:]
         for category in Category.allCases {
             if let hottest = snapshot.group(category).first?.celsius {
@@ -56,7 +70,9 @@ public struct ThermalSample: Codable, Equatable, Identifiable, Sendable {
             fanUtilization: snapshot.fans.map(\.utilization),
             thermalStateName: snapshot.thermal.name,
             thermalSeverity: snapshot.thermal.severity,
-            topProcesses: processes
+            topProcesses: processes,
+            processSnapshotID: processSnapshotID,
+            processSampledAt: processSampledAt
         )
     }
 

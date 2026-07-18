@@ -41,9 +41,18 @@ public enum ThermalEventAnalyzer {
     public static func events(
         samples: [ThermalSample],
         thresholdCelsius: Double,
-        recoveryMarginCelsius: Double = 3
+        recoveryMarginCelsius: Double = 3,
+        isCancelled: () -> Bool = { false }
     ) -> [ThermalEvent] {
-        let ordered = samples.sorted { $0.timestamp < $1.timestamp }
+        guard !isCancelled() else { return [] }
+        let ordered: [ThermalSample]
+        if samples.indices.dropFirst().allSatisfy({
+            samples[$0 - 1].timestamp <= samples[$0].timestamp
+        }) {
+            ordered = samples
+        } else {
+            ordered = samples.sorted { $0.timestamp < $1.timestamp }
+        }
         guard let first = ordered.first else { return [] }
 
         var result: [ThermalEvent] = []
@@ -57,7 +66,8 @@ public enum ThermalEventAnalyzer {
             result.append(event(from: first, kind: .pressureBegan))
         }
 
-        for sample in ordered.dropFirst() {
+        for (offset, sample) in ordered.dropFirst().enumerated() {
+            if offset.isMultiple(of: 256), isCancelled() { return [] }
             if !temperatureIsActive, sample.hottestCelsius >= thresholdCelsius {
                 temperatureIsActive = true
                 result.append(event(from: sample, kind: .temperatureExceeded, threshold: thresholdCelsius))

@@ -3,7 +3,8 @@ import Foundation
 public enum ThermalAnalytics {
     public static func processCorrelations(
         samples: [ThermalSample],
-        minimumObservations: Int = 3
+        minimumObservations: Int = 3,
+        isCancelled: () -> Bool = { false }
     ) -> [ProcessCorrelation] {
         guard samples.count >= minimumObservations else { return [] }
 
@@ -15,12 +16,28 @@ public enum ThermalAnalytics {
             var observations = 0
         }
 
-        let count = Double(samples.count)
-        let temperatureSum = samples.reduce(0) { $0 + $1.hottestCelsius }
-        let temperatureSquaredSum = samples.reduce(0) { $0 + $1.hottestCelsius * $1.hottestCelsius }
+        var uniqueSamples: [ThermalSample] = []
+        uniqueSamples.reserveCapacity(samples.count)
+        var seenProcessSnapshots: Set<UUID> = []
+        for (index, sample) in samples.enumerated() {
+            if index.isMultiple(of: 256), isCancelled() { return [] }
+            if let snapshotID = sample.processSnapshotID,
+               !seenProcessSnapshots.insert(snapshotID).inserted {
+                continue
+            }
+            uniqueSamples.append(sample)
+        }
+        guard uniqueSamples.count >= minimumObservations else { return [] }
+
+        let count = Double(uniqueSamples.count)
+        var temperatureSum = 0.0
+        var temperatureSquaredSum = 0.0
         var aggregates: [String: Aggregate] = [:]
 
-        for sample in samples {
+        for (index, sample) in uniqueSamples.enumerated() {
+            if index.isMultiple(of: 256), isCancelled() { return [] }
+            temperatureSum += sample.hottestCelsius
+            temperatureSquaredSum += sample.hottestCelsius * sample.hottestCelsius
             // Preserve the previous first-process-per-name behavior when an app
             // has several helper processes in the same `ps` snapshot.
             var seenNames: Set<String> = []
@@ -35,6 +52,7 @@ public enum ThermalAnalytics {
             }
         }
 
+        guard !isCancelled() else { return [] }
         return aggregates.compactMap { name, value in
             guard value.observations >= minimumObservations else { return nil }
             let average = value.cpuSum / count

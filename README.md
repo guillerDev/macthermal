@@ -102,6 +102,12 @@ Automatic recordings stop only after a configurable recovery period, once
 pressure is clear and the hotspot is below a recovery margin, so a brief
 fluctuation does not split one thermal episode into several files. Each one
 also includes up to two minutes of pre-trigger history to preserve the lead-up.
+Active recordings use a recoverable incremental journal, and long episodes are
+split at a configurable duration so they cannot grow without bound in memory.
+Incident retention and maximum recording count are configurable in Settings.
+High-resolution incident samples stay in the incident journal; the general
+history always keeps its selected 15/30/60-second cadence so comparisons remain
+statistically balanced.
 Reports include the Mac model identifier, macOS version, architecture, memory,
 and logical core count, but never the serial number, account name, or computer
 name.

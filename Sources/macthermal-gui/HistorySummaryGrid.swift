@@ -7,10 +7,10 @@ struct HistorySummaryGrid: View {
     let samples: [ThermalSample]
     let unit: TempUnit
 
-    private var summary: ThermalSummary { ThermalSummary(samples: samples) }
     private let columns = [GridItem(.adaptive(minimum: 170), spacing: DesignMetrics.standardSpacing)]
 
     var body: some View {
+        let summary = ThermalSummary(samples: samples)
         LazyVGrid(columns: columns, spacing: DesignMetrics.standardSpacing) {
             MetricCard(
                 title: "Average hotspot",
