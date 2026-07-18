@@ -566,6 +566,44 @@ struct Tests {
             expect(false, "JSON parses into the expected shape")
         }
 
+        // --- heat contributors: rank by CPU while hot, not by correlation ---
+        // A process pegged at steady high CPU (the usual culprit for sustained
+        // heat) must outrank a low-CPU process whose usage merely tracks
+        // temperature — the opposite of what raw Pearson correlation would do.
+        let heatSamples: [ThermalSample] = (0..<20).map { i in
+            let temp = 60.0 + Double(i)               // hotspot rises 60 -> 79
+            let tracker = max(0, temp - 55)           // co-moves with temperature
+            return ThermalSample(
+                timestamp: Date(timeIntervalSince1970: Double(i) * 15),
+                hottestCelsius: temp,
+                averageCelsius: temp - 10,
+                categoryPeaks: ["CPU": temp],
+                fanRPM: [2_000],
+                fanUtilization: [30],
+                thermalStateName: "nominal",
+                thermalSeverity: .ok,
+                topProcesses: [
+                    ProcessUsage(pid: 1, name: "StuckHelper", cpuPercent: 70),       // steady, high
+                    ProcessUsage(pid: 2, name: "WindowServer", cpuPercent: tracker), // co-moves, lower
+                ],
+                processSnapshotID: UUID(),
+                processSampledAt: Date(timeIntervalSince1970: Double(i) * 15)
+            )
+        }
+        let contributors = ThermalAnalytics.heatContributors(samples: heatSamples)
+        expect(contributors.first?.processName == "StuckHelper",
+               "heat contributors rank the steadily-pegged process first, not the co-mover")
+        expect(contributors.first?.pattern == .steadyLoad,
+               "a flat high-CPU process is labeled steady load")
+        if let windowServer = contributors.first(where: { $0.processName == "WindowServer" }) {
+            expect(windowServer.pattern == .tracksTemperature,
+                   "a process whose CPU tracks temperature is labeled accordingly")
+        } else {
+            expect(false, "WindowServer should still appear as a contributor")
+        }
+        expect(ThermalAnalytics.heatContributors(samples: Array(heatSamples.prefix(2))).isEmpty,
+               "heat contributors need at least three observations")
+
         let tag = failures == 0 ? "ok" : "FAILED"
         let summary = "macthermal tests: \(checks - failures)/\(checks) passed — \(tag)\n"
         FileHandle.standardOutput.write(summary.data(using: .utf8)!)

@@ -6,7 +6,7 @@ import MacThermalCore
 struct ContributorsView: View {
     @EnvironmentObject private var archive: ThermalArchiveState
     @State private var range: HistoryRange = .oneHour
-    @State private var correlations: [ProcessCorrelation] = []
+    @State private var contributors: [HeatContributor] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,31 +23,31 @@ struct ContributorsView: View {
             .padding()
             Divider()
 
-            if correlations.isEmpty {
+            if contributors.isEmpty {
                 EmptyStateView(
-                    title: "Not enough process evidence",
-                    message: "Keep MacThermal running while the Mac heats up. At least three observations of a process are required.",
+                    title: "No heat to attribute yet",
+                    message: "Keep MacThermal running while the Mac heats up. Once there are hot samples with process data, the processes using the most CPU during them appear here.",
                     systemImage: "bolt.horizontal.circle"
                 )
             } else {
                 VStack(alignment: .leading, spacing: DesignMetrics.sectionSpacing) {
                     ContributorExplanationView()
-                    ContributorsChart(correlations: Array(correlations.prefix(8)))
+                    ContributorsChart(contributors: Array(contributors.prefix(8)))
                         .frame(minHeight: 230)
-                    ContributorsTable(correlations: correlations)
+                    ContributorsTable(contributors: contributors)
                 }
                 .padding()
             }
         }
         .navigationTitle("Likely Contributors")
-        .task(id: analysisRevision) { await updateCorrelations() }
+        .task(id: analysisRevision) { await updateContributors() }
     }
 
-    private func updateCorrelations() async {
+    private func updateContributors() async {
         do {
             let cutoff = Date.now.addingTimeInterval(-range.duration)
             let samples = try await AnalyticsEngine.shared.recentSamples(archive.history, since: cutoff)
-            correlations = try await AnalyticsEngine.shared.processCorrelations(samples)
+            contributors = try await AnalyticsEngine.shared.heatContributors(samples)
         } catch is CancellationError {
             return
         } catch {

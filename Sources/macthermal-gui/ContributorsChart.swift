@@ -5,22 +5,21 @@ import MacThermalCore
 #endif
 
 struct ContributorsChart: View {
-    let correlations: [ProcessCorrelation]
+    let contributors: [HeatContributor]
 
     var body: some View {
-        Chart(correlations) { item in
+        Chart(contributors) { item in
             BarMark(
-                x: .value("Correlation", max(0, item.coefficient)),
+                x: .value("CPU while hot", item.hotAverageCPUPercent),
                 y: .value("Process", item.processName)
             )
             .foregroundStyle(by: .value("Process", item.processName))
             .annotation(position: .trailing) {
-                Text(item.coefficient, format: .number.precision(.fractionLength(2)))
+                Text("\(item.hotAverageCPUPercent.formatted(.number.precision(.fractionLength(0))))%")
                     .font(.callout)
             }
         }
-        .chartXScale(domain: 0...1)
         .chartLegend(.hidden)
-        .accessibilityLabel("Process heat correlations")
+        .accessibilityLabel("CPU used by each process while the Mac was hot")
     }
 }

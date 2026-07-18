@@ -32,9 +32,9 @@ actor AnalyticsEngine {
         return result
     }
 
-    func processCorrelations(_ samples: [ThermalSample]) throws -> [ProcessCorrelation] {
+    func heatContributors(_ samples: [ThermalSample]) throws -> [HeatContributor] {
         try Task.checkCancellation()
-        let result = ThermalAnalytics.processCorrelations(
+        let result = ThermalAnalytics.heatContributors(
             samples: samples,
             isCancelled: { Task.isCancelled }
         )
