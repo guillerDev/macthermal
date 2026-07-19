@@ -140,6 +140,7 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .padding()
         .frame(width: 600, height: 720)
+        .onAppear { monitor.refreshNotificationAuthorization() }
     }
 
     private func openDataFolder() {

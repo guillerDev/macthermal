@@ -9,5 +9,6 @@ enum SettingsWindowOpener {
             application.activate(ignoringOtherApps: true)
             return
         }
+        NSLog("macthermal: could not open Settings — no known selector responded (macOS may have renamed it).")
     }
 }

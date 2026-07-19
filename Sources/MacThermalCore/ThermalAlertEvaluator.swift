@@ -22,22 +22,33 @@ public struct ThermalAlertEvaluator: Sendable {
             now.timeIntervalSince($0) < configuration.cooldown
         } ?? false
 
+        // Temperature bookkeeping runs on every sample (it is no longer skipped by
+        // the pressure branch's early return), so a genuine sub-threshold dip
+        // always restarts the "continuously hot" timer.
+        if sample.hottestCelsius >= configuration.thresholdCelsius {
+            if hotSince == nil { hotSince = now }
+        } else {
+            hotSince = nil
+        }
+
         let pressureIsActive = sample.thermalSeverity == .warn || sample.thermalSeverity == .critical
-        defer { pressureWasActive = pressureIsActive }
-        if configuration.notifyOnThermalPressure,
-           pressureIsActive,
-           !pressureWasActive,
-           !coolingDown {
+        let pressureRisingEdge = pressureIsActive && !pressureWasActive
+
+        if configuration.notifyOnThermalPressure, pressureRisingEdge, !coolingDown {
+            pressureWasActive = true
             lastNotificationAt = now
             return .thermalPressure(state: sample.thermalStateName)
         }
-
-        guard sample.hottestCelsius >= configuration.thresholdCelsius else {
-            hotSince = nil
-            return nil
+        // Only consume the rising edge once we've actually alerted. If a cooldown
+        // (from any alert) suppresses it, leave `pressureWasActive` false so the
+        // alert still fires when the cooldown clears, rather than being dropped for
+        // the whole throttling episode.
+        if !pressureIsActive {
+            pressureWasActive = false
+        } else if !pressureRisingEdge {
+            pressureWasActive = true
         }
 
-        if hotSince == nil { hotSince = now }
         guard let hotSince,
               now.timeIntervalSince(hotSince) >= configuration.sustainedDuration,
               !coolingDown else { return nil }

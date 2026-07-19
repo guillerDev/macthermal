@@ -626,6 +626,36 @@ struct Tests {
         let spikyContributors = ThermalAnalytics.heatContributors(samples: spikySamples)
         expect(spikyContributors.first?.processName == "BusyApp",
                "a lone temperature spike doesn't collapse the hot set to empty")
+        // --- alert evaluator: a suppressed thermal-pressure edge is not lost ---
+        func at(_ seconds: Double) -> Date { Date(timeIntervalSince1970: seconds) }
+        var pressureEval = ThermalAlertEvaluator()
+        let cooldownCfg = AlertConfiguration(
+            enabled: true, thresholdCelsius: 90, sustainedDuration: 10,
+            cooldown: 300, notifyOnThermalPressure: true
+        )
+        _ = pressureEval.evaluate(sample: sample(seconds: 0, hotspot: 95), configuration: cooldownCfg, now: at(0))
+        let sustainedFire = pressureEval.evaluate(sample: sample(seconds: 10, hotspot: 95), configuration: cooldownCfg, now: at(10))
+        expect(sustainedFire == .sustainedTemperature(celsius: 95),
+               "sustained-temperature alert fires after the sustained duration")
+        let suppressedEdge = pressureEval.evaluate(sample: sample(seconds: 15, hotspot: 50, severity: .warn), configuration: cooldownCfg, now: at(15))
+        expect(suppressedEdge == nil, "a pressure edge inside the cooldown is suppressed")
+        let firesAfterCooldown = pressureEval.evaluate(sample: sample(seconds: 320, hotspot: 50, severity: .warn), configuration: cooldownCfg, now: at(320))
+        expect(firesAfterCooldown == .thermalPressure(state: "serious"),
+               "a suppressed pressure edge still fires once the cooldown clears (not lost forever)")
+
+        // --- alert evaluator: a sub-threshold dip restarts the sustained timer,
+        //     even when a pressure alert fired on the same sample ---
+        var sustainedEval = ThermalAlertEvaluator()
+        let noCooldownCfg = AlertConfiguration(
+            enabled: true, thresholdCelsius: 90, sustainedDuration: 10,
+            cooldown: 0, notifyOnThermalPressure: true
+        )
+        _ = sustainedEval.evaluate(sample: sample(seconds: 0, hotspot: 95), configuration: noCooldownCfg, now: at(0))
+        _ = sustainedEval.evaluate(sample: sample(seconds: 2, hotspot: 85, severity: .warn), configuration: noCooldownCfg, now: at(2))
+        _ = sustainedEval.evaluate(sample: sample(seconds: 3, hotspot: 91), configuration: noCooldownCfg, now: at(3))
+        let notYetSustained = sustainedEval.evaluate(sample: sample(seconds: 11, hotspot: 91), configuration: noCooldownCfg, now: at(11))
+        expect(notYetSustained == nil,
+               "a sub-threshold dip restarts the sustained timer even when a pressure alert fired")
 
         let tag = failures == 0 ? "ok" : "FAILED"
         let summary = "macthermal tests: \(checks - failures)/\(checks) passed — \(tag)\n"
