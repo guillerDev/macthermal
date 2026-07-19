@@ -604,6 +604,29 @@ struct Tests {
         expect(ThermalAnalytics.heatContributors(samples: Array(heatSamples.prefix(2))).isEmpty,
                "heat contributors need at least three observations")
 
+        // Regression: a lone temperature spike must not collapse the hot set to a
+        // single sample and leave the list empty (the peak-minus-fixed-margin bug
+        // that made "Likely Contributors" empty for short/spiky windows).
+        let spikySamples: [ThermalSample] = (0..<30).map { i in
+            let temp = i == 5 ? 100.0 : 58.0 + Double(i % 6)   // one 100°C blip, rest ~58–63°C
+            return ThermalSample(
+                timestamp: Date(timeIntervalSince1970: Double(i) * 15),
+                hottestCelsius: temp,
+                averageCelsius: temp - 10,
+                categoryPeaks: ["CPU": temp],
+                fanRPM: [2_000],
+                fanUtilization: [30],
+                thermalStateName: "nominal",
+                thermalSeverity: .ok,
+                topProcesses: [ProcessUsage(pid: 7, name: "BusyApp", cpuPercent: 40)],
+                processSnapshotID: UUID(),
+                processSampledAt: Date(timeIntervalSince1970: Double(i) * 15)
+            )
+        }
+        let spikyContributors = ThermalAnalytics.heatContributors(samples: spikySamples)
+        expect(spikyContributors.first?.processName == "BusyApp",
+               "a lone temperature spike doesn't collapse the hot set to empty")
+
         let tag = failures == 0 ? "ok" : "FAILED"
         let summary = "macthermal tests: \(checks - failures)/\(checks) passed — \(tag)\n"
         FileHandle.standardOutput.write(summary.data(using: .utf8)!)

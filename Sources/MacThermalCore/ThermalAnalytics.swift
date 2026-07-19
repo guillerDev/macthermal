@@ -84,12 +84,14 @@ public enum ThermalAnalytics {
     /// hot matches what the user sees in Activity Monitor and is directly
     /// actionable. Correlation is kept only to label the *pattern*.
     ///
-    /// "Hot" is defined relative to the window (within `hotMarginCelsius` of the
-    /// window's peak hotspot) so the metric adapts to the machine instead of
-    /// relying on a fixed absolute threshold that never triggers on a cool laptop.
+    /// "Hot" is the window's hottest ~third of samples, taken from the temperature
+    /// *distribution* rather than a fixed margin below the single peak — otherwise
+    /// one brief spike (e.g. a lone 100 °C blip in an otherwise 50–70 °C hour)
+    /// pushes the threshold up and excludes nearly every sample, leaving the list
+    /// empty for short or spiky windows. It still adapts to the machine.
     public static func heatContributors(
         samples: [ThermalSample],
-        hotMarginCelsius: Double = 10,
+        hotFraction: Double = 1.0 / 3.0,
         minimumObservations: Int = 3,
         isCancelled: () -> Bool = { false }
     ) -> [HeatContributor] {
@@ -97,8 +99,14 @@ public enum ThermalAnalytics {
         let uniqueSamples = uniqueByProcessSnapshot(samples, isCancelled: isCancelled)
         guard uniqueSamples.count >= minimumObservations, !isCancelled() else { return [] }
 
-        let peak = uniqueSamples.map(\.hottestCelsius).max() ?? 0
-        let threshold = peak - hotMarginCelsius
+        // Temperature threshold at the (1 - hotFraction) percentile, but never
+        // fewer than `minimumObservations` samples deep, so the hot set is robust
+        // to outliers and to small windows.
+        let descendingTemps = uniqueSamples.map(\.hottestCelsius).sorted(by: >)
+        let fractionIndex = Int((Double(descendingTemps.count) * hotFraction).rounded()) - 1
+        let cutoffIndex = min(descendingTemps.count - 1,
+                              max(minimumObservations - 1, max(0, fractionIndex)))
+        let threshold = descendingTemps[cutoffIndex]
         let hotSamples = uniqueSamples.filter { $0.hottestCelsius >= threshold }
         guard hotSamples.count >= minimumObservations else { return [] }
 
