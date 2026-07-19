@@ -19,9 +19,12 @@ struct ComparisonView: View {
         VStack(spacing: 0) {
             HStack {
                 Picker("Period", selection: $range) {
-                    ForEach(HistoryRange.allCases) { range in
+                    // Only offer ranges the current retention can actually compare
+                    // (per-option `.disabled` is a no-op on a segmented picker).
+                    ForEach(HistoryRange.allCases.filter {
+                        $0.supportsComparison(retentionDays: settings.retentionDays)
+                    }) { range in
                         Text(range.title).tag(range)
-                            .disabled(!range.supportsComparison(retentionDays: settings.retentionDays))
                     }
                 }
                 .pickerStyle(.segmented)

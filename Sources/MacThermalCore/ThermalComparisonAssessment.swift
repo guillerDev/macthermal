@@ -22,6 +22,19 @@ public struct ThermalComparisonAssessment: Equatable, Sendable {
     public let result: ThermalComparisonResult
 
     public init(comparison: ThermalComparison) {
+        // With no samples on a side, every delta is measured against a zeroed
+        // summary and would read as a huge spurious swing (e.g. "70°C → 0").
+        // Report "unchanged" rather than a misleading verdict. (The GUI already
+        // gates on coverage; this keeps the core honest for any other caller.)
+        guard comparison.baseline.sampleCount > 0, comparison.current.sampleCount > 0 else {
+            averageHotspotTrend = .unchanged
+            peakHotspotTrend = .unchanged
+            fanTrend = .contextual
+            pressureTrend = .unchanged
+            result = .unchanged
+            return
+        }
+
         let averageTrend = Self.lowerIsBetter(
             delta: comparison.hotspotDeltaCelsius,
             tolerance: 1

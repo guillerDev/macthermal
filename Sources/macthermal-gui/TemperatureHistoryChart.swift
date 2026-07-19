@@ -66,6 +66,8 @@ struct TemperatureHistoryChart: View {
                         .foregroundStyle(by: .value("Series", "Hotspot"))
                         .lineStyle(StrokeStyle(lineWidth: 2))
                         .interpolationMethod(.catmullRom)
+                        .accessibilityLabel(sample.timestamp.formatted(date: .abbreviated, time: .shortened))
+                        .accessibilityValue("\(unit.convert(hotspot).formatted(.number.precision(.fractionLength(0))))\(unit.symbol)")
                     }
 
                     if let average = selectedScope.average(in: sample) {
