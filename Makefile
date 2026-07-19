@@ -10,6 +10,9 @@ PREFIX    ?= /usr/local
 # otherwise defaults min-OS to the SDK version, silently raising the requirement.
 ARCH   := $(shell uname -m)
 DEPLOY := -target $(ARCH)-apple-macos13.0
+# The actor / @MainActor / Sendable-value-model architecture is data-race clean,
+# so the whole project builds under the Swift 6 language mode.
+SWIFT6 := -swift-version 6
 
 # Version stamped into the .app bundle. Pass APP_VERSION=… to override (the
 # release CI passes the exact tag); otherwise it's derived from `git describe`,
@@ -32,7 +35,7 @@ all: build
 build: $(BIN)
 
 $(BIN): $(CLI_SRC)
-	swiftc -O $(DEPLOY) -framework IOKit -o $(BIN) $(CLI_SRC)
+	swiftc -O $(DEPLOY) $(SWIFT6) -framework IOKit -o $(BIN) $(CLI_SRC)
 
 run: build
 	./$(BIN)
@@ -42,14 +45,14 @@ watch: build
 
 # ---- Tests (pure-logic, no SMC hardware required) ----
 test: $(TEST_SRC)
-	@swiftc -parse-as-library -framework IOKit -o $(TEST_BIN) $(TEST_SRC)
+	@swiftc $(SWIFT6) -parse-as-library -framework IOKit -o $(TEST_BIN) $(TEST_SRC)
 	@./$(TEST_BIN)
 
 # ---- Menu-bar GUI (.app bundle) ----
 gui: $(APP)
 
 $(APP): $(GUI_SRC) Resources/Info.plist Resources/AppIcon.icns
-	swiftc -O $(DEPLOY) -parse-as-library -framework IOKit -framework SwiftUI -framework AppKit \
+	swiftc -O $(DEPLOY) $(SWIFT6) -parse-as-library -framework IOKit -framework SwiftUI -framework AppKit \
 		-framework ServiceManagement -framework Charts -framework UserNotifications \
 		-o $(GUI_BIN) $(GUI_SRC)
 	rm -rf $(APP)

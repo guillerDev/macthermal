@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.0
 //
 // SwiftPM manifest — lets Xcode (and SourceKit-LSP) open the project with a full
 // whole-module view: editing, autocomplete, and building/running the CLI + tests.
@@ -10,8 +10,10 @@
 // files `import MacThermalCore` behind a `#if canImport(...)` guard that the flat
 // Makefile build (one module, no such import) simply compiles away.
 //
-// Pinned to tools 5.9 (Swift 5 language mode) on purpose: it matches the current
-// `swiftc` build and avoids Swift 6 strict-concurrency errors in the GUI actor code.
+// Tools 6.0 → the Swift 6 language mode for every target. The actor / @MainActor /
+// Sendable-value-model architecture is data-race clean, so complete concurrency
+// checking passes with no changes; the flat `swiftc` build sets `-swift-version 6`
+// to match.
 
 import PackageDescription
 

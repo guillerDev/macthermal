@@ -6,8 +6,8 @@ actor LoginItemManager {
         LaunchAtLogin.isEnabled
     }
 
-    func setEnabled(_ enabled: Bool) -> Bool {
-        LaunchAtLogin.setEnabled(enabled)
-        return LaunchAtLogin.isEnabled
+    func setEnabled(_ enabled: Bool) -> (succeeded: Bool, isEnabled: Bool) {
+        let succeeded = LaunchAtLogin.setEnabled(enabled)
+        return (succeeded, LaunchAtLogin.isEnabled)
     }
 }

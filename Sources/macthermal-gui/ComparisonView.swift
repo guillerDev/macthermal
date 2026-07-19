@@ -19,9 +19,12 @@ struct ComparisonView: View {
         VStack(spacing: 0) {
             HStack {
                 Picker("Period", selection: $range) {
-                    ForEach(HistoryRange.allCases) { range in
+                    // Only offer ranges the current retention can actually compare
+                    // (per-option `.disabled` is a no-op on a segmented picker).
+                    ForEach(HistoryRange.allCases.filter {
+                        $0.supportsComparison(retentionDays: settings.retentionDays)
+                    }) { range in
                         Text(range.title).tag(range)
-                            .disabled(!range.supportsComparison(retentionDays: settings.retentionDays))
                     }
                 }
                 .pickerStyle(.segmented)
@@ -33,11 +36,14 @@ struct ComparisonView: View {
             .padding()
             Divider()
 
-            if let analysis, analysis.isReliable {
+            if let analysis, analysis.hasComparableData {
                 let comparison = analysis.comparison
                 let assessment = ThermalComparisonAssessment(comparison: comparison)
                 ScrollView {
                     VStack(alignment: .leading, spacing: DesignMetrics.sectionSpacing) {
+                        if !analysis.isReliable {
+                            limitedCoverageBanner
+                        }
                         LazyVGrid(columns: columns, spacing: DesignMetrics.standardSpacing) {
                             ComparisonPeriodSummaryView(
                                 title: "Previous",
@@ -178,9 +184,20 @@ struct ComparisonView: View {
         )
     }
 
+    private var limitedCoverageBanner: some View {
+        Label(
+            "Limited coverage — one or both periods have sampling gaps (the Mac may have been idle or asleep), so treat this comparison as approximate.",
+            systemImage: "exclamationmark.triangle"
+        )
+        .foregroundStyle(.secondary)
+        .padding(DesignMetrics.cardPadding)
+        .background(.quaternary)
+        .clipShape(.rect(cornerRadius: DesignMetrics.cornerRadius))
+    }
+
     private var emptyStateTitle: String {
         range.supportsComparison(retentionDays: settings.retentionDays)
-            ? "Complete periods are required"
+            ? "Not enough data yet"
             : "Retention is too short"
     }
 
@@ -188,6 +205,6 @@ struct ComparisonView: View {
         if !range.supportsComparison(retentionDays: settings.retentionDays) {
             return "A \(range.title) comparison requires at least two complete periods. Increase history retention in Settings or choose a shorter range."
         }
-        return "MacThermal requires at least 80% observed coverage in both periods. Keep it running longer or choose a shorter range."
+        return "Keep MacThermal running to record two \(range.title) periods to compare."
     }
 }
