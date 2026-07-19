@@ -113,9 +113,14 @@ final class ThermalMonitor: ObservableObject {
         loginItemRequestID = requestID
         launchAtLogin = enabled
         Task {
-            let actualValue = await loginItemManager.setEnabled(enabled)
+            let result = await loginItemManager.setEnabled(enabled)
             guard loginItemRequestID == requestID else { return }
-            launchAtLogin = actualValue
+            launchAtLogin = result.isEnabled
+            if !result.succeeded {
+                presentedError = UserFacingError(
+                    message: "Open at Login couldn't be turned \(enabled ? "on" : "off"). You can add or remove MacThermal manually in System Settings ▸ General ▸ Login Items."
+                )
+            }
         }
     }
 
@@ -162,6 +167,14 @@ final class ThermalMonitor: ObservableObject {
             } catch {
                 presentedError = UserFacingError(message: "Notification permission failed: \(error.localizedDescription)")
             }
+        }
+    }
+
+    /// Re-reads notification authorization, which can change at runtime if the
+    /// user grants or revokes it in System Settings while the app is running.
+    func refreshNotificationAuthorization() {
+        Task {
+            notificationsAuthorized = await notificationManager.authorizationStatus() == .authorized
         }
     }
 
