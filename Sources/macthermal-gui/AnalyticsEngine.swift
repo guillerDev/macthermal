@@ -106,4 +106,13 @@ struct ComparisonAnalysis: Sendable {
     var isReliable: Bool {
         baselineCoverage.fraction >= 0.8 && currentCoverage.fraction >= 0.8
     }
+
+    /// Both periods have enough samples to compute a meaningful average, even if
+    /// coverage is imperfect. The view shows the comparison (with a "limited
+    /// coverage" caveat) when this holds, instead of hiding usable data behind the
+    /// stricter `isReliable` gate — which left short ranges blank whenever the Mac
+    /// idled or slept and sampled sparsely.
+    var hasComparableData: Bool {
+        comparison.baseline.sampleCount >= 3 && comparison.current.sampleCount >= 3
+    }
 }
