@@ -26,7 +26,14 @@ jobs:
       # tap-bump step is skipped and you update the formula manually.
       TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
     steps:
+      # fetch-depth: 0 pulls the full history + all tags so the changelog step
+      # can `git log <prev-tag>..<tag>`. `ref` pins us to the tagged commit for
+      # both triggers (tag push already checks it out; workflow_dispatch would
+      # otherwise land on the default branch).
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          fetch-depth: 0
 
       # Surfaces the SDK the .app gets linked against (want 26.x so the released
       # app matches local Tahoe builds). Handy when diagnosing appearance drift.
@@ -61,12 +68,36 @@ jobs:
           curl -fsSL "$URL" -o src.tar.gz
           echo "value=$(shasum -a 256 src.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
+      # Full commit-level changelog since the previous tag, so the release notes
+      # carry every change (this repo commits straight to main, so GitHub's
+      # PR-based auto-notes would come up empty). `git describe ...^` finds the
+      # tag before this one; on the very first release it returns nothing and we
+      # list the entire history instead.
+      - name: Build changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          {
+            echo "### What's changed"
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              git log --no-merges --pretty=format:'- %s (%h)' "${PREV_TAG}..${TAG}"
+            else
+              git log --no-merges --pretty=format:'- %s (%h)' "${TAG}"
+            fi
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo
+              echo "**Full diff:** https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${TAG}"
+            fi
+          } > changelog.md
+
       # Quoted heredoc (<<'EOF') so the literal backticks below are NOT treated
       # as shell command substitution. All placeholders are GitHub ${{ }}
-      # expressions, which are interpolated before the shell runs.
+      # expressions, which are interpolated before the shell runs. The changelog
+      # built above is prepended so it leads the release notes.
       - name: Write release notes
         run: |
-          cat > notes.md <<'EOF'
+          cat > install.md <<'EOF'
           ### Install (Homebrew tap)
 
           ```sh
@@ -88,6 +119,8 @@ jobs:
           The attached `macthermal-app-*.zip` is the ad-hoc-signed menu-bar app.
           After downloading: `xattr -dr com.apple.quarantine MacThermal.app`
           EOF
+          printf '%s\n\n' "$(cat changelog.md)" > notes.md
+          cat install.md >> notes.md
 
       - name: Create GitHub Release
         env:
