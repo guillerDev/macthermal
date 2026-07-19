@@ -35,6 +35,16 @@ jobs:
           swiftc --version
           echo "macOS SDK: $(xcrun --show-sdk-version)"
 
+      # Stamp the released version from the tag so the built .app reports it
+      # (Resources/Info.plist otherwise carries a static dev version). CI-only —
+      # the working copy is patched for this build, not committed.
+      - name: Stamp app version from tag
+        run: |
+          VERSION="${TAG#v}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION}" Resources/Info.plist
+          echo "Stamped Info.plist to ${VERSION}"
+
       - name: Build & test
         run: |
           make test
