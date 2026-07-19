@@ -1,135 +1,152 @@
 ---
 name: release
-description: >-
-  Cut and ship a new macthermal release, or explain the automated release +
-  Homebrew publishing pipeline. Use when the user wants to tag/publish a version,
-  ship a release, bump the version, or asks how releases, release notes/changelog,
-  or the Homebrew tap get updated.
+description: Releasing and distributing a macOS Swift app — choosing a channel (Mac App Store / Developer ID / Homebrew), versioning from a git tag as the single source of truth, code signing with entitlements + Hardened Runtime, App Sandbox tradeoffs, optional notarization + stapling (developer's choice), automating it from a tag in CI, and Homebrew-cask publishing. Use when cutting/publishing a release, wiring a release pipeline, deciding a distribution channel, or fixing Gatekeeper / notarization / entitlement failures.
 ---
 
-# Releasing macthermal
+# Releasing & distributing a macOS Swift app
 
-A release is **tag-driven**: pushing a `vMAJOR.MINOR.PATCH` tag triggers
-[`.github/workflows/release.yml`](../../../.github/workflows/release.yml), which
-builds, tests, publishes a GitHub Release (with a commit-level changelog), and
-bumps the Homebrew tap. The tag is the single source of truth for the version —
-`VERSION=${TAG#v}` flows into the formula and cask automatically.
+## 1. Pick a channel — it drives signing, sandbox, and notarization
 
-**Authoritative reference:** [docs/RELEASING.md](../../../docs/RELEASING.md) —
-one-time tap-token setup, tap layout, manual fallback, and the troubleshooting
-table. This skill is the *procedure*; that doc is the *detail*. Keep both in sync
-with the workflow if you change it.
+| Channel | Signing identity | App Sandbox | Notarize | `get-task-allow` |
+|---|---|---|---|---|
+| **Mac App Store** | App Store cert (via App Store Connect) | **required** | Apple does it | must be absent |
+| **Developer ID** (direct download or Homebrew) | Developer ID Application | **optional** | **recommended** (`notarytool`) | must be absent |
+| **Ad-hoc / unsigned** (local dev, CI, or direct download with a caveat) | `-` (ad-hoc) or none | as configured | no | left `true` |
 
-Actions runs on GitHub, so the repo must be pushed there first — nothing here
-runs locally except the preflight.
+Key consequence: **the sandbox is required only for the App Store.** For direct /
+Homebrew distribution it's optional — and it *constrains* the app (subprocess
+file access needs security-scoped bookmarks, network needs an entitlement,
+credential helpers are limited). Decide up front whether you even want it.
 
----
+**Notarization is likewise optional off the App Store — the developer's call, a
+tradeoff, not a requirement.** Notarizing (Developer ID + Hardened Runtime, §4)
+lets the download open with no Gatekeeper prompt. Skipping it — shipping ad-hoc-
+signed or Developer-ID-signed-but-un-notarized — is a legitimate choice; the cost
+is that Gatekeeper quarantines the download, so you document a one-time user
+workaround (right-click ▸ **Open**, or `xattr -dr com.apple.quarantine App.app`).
+Only the App Store mandates Apple's own review; everything else is opt-in.
 
-## 1. Preflight (before tagging)
+## 2. Versioning: the git tag is the single source of truth
 
-Do these **on `main`, before creating the tag** — CI does not do them for you.
+Don't hand-edit a version in a plist or constant. Use an annotated SemVer tag
+`vMAJOR.MINOR.PATCH`; everything downstream derives from it.
 
-- [ ] **Clean tree, on `main`, pushed:** `git status` clean, `git rev-parse --abbrev-ref HEAD` is `main`, and `git push` so `origin/main` is current.
-- [ ] **Pick the semver bump.** patch = fixes, minor = features, major = breaking. Look at `git log $(git describe --tags --abbrev=0)..HEAD --oneline` to justify the level.
-- [ ] **`make test`** passes locally (CI reruns it, but catch failures before tagging).
+- **MAJOR** breaking, **MINOR** new backward-compatible feature, **PATCH** fixes.
+- The leading `v` is on the *tag and release asset* (`App-v1.2.0.zip`); the
+  *app/cask version string* drops it (`1.2.0`).
+- Tags are immutable and monotonic — never move or reuse one (downloads are pinned
+  by checksum).
 
-> **You do not bump the app-bundle version by hand.** `make gui` stamps the
-> version into the `.app`'s Info.plist at build time from `APP_VERSION` (default:
-> `git describe`), so the committed
-> [Resources/Info.plist](../../../Resources/Info.plist) stays a static placeholder
-> — leave it alone. The GUI embeds `CFBundleShortVersionString` in its diagnostic
-> reports (via `SystemProfileProvider` → `DiagnosticContext` → the HTML/CSV report).
-
-**What the stamped version looks like.** It's derived from the git **tag**, not
-from the placeholder in Info.plist:
-
-- **Released `.app`** → the exact tag, clean. CI passes `APP_VERSION=${TAG#v}` (e.g. `0.5.1`), and even without that, a clean checkout sitting on the tag makes `git describe` = `v0.5.1` with no suffix.
-- **Local `make gui`** → the tag plus build-position info, e.g. `0.5.1-3-g1c72685-dirty`:
-
-  | Part | Meaning |
-  |------|---------|
-  | `0.5.1` | most recent tag (`v0.5.1`), `v` stripped |
-  | `-3` | commits since that tag |
-  | `g1c72685` | `g` (git) + abbreviated commit hash |
-  | `-dirty` | uncommitted changes in the working tree |
-
-  The suffix is a *local-dev-only* signal (which commit / dirty state a diagnostic report came from); it never appears on a real release. Force a specific value with `make gui APP_VERSION=x.y.z`.
-
----
-
-## 2. Cut the release
-
-The tag **must** match `v<MAJOR>.<MINOR>.<PATCH>` — the workflow triggers on
-`tags: ['v*']` and derives the Homebrew version from it.
+The build resolves the version in priority order and stamps it in, restoring the
+working tree afterward (a `trap`) so nothing is left dirty:
 
 ```sh
-git tag v0.5.2
-git push origin v0.5.2        # or: git push --tags
+VERSION="${RELEASE_VERSION:-$(git describe --tags --abbrev=0 | sed 's/^v//')}"
+VERSION="${VERSION:-0.0.0}"   # fresh clone, no tags
+# stamp CFBundleShortVersionString + CFBundleVersion in the built Info.plist
 ```
 
-That's the whole manual release. Everything below happens automatically on the
-runner.
+## 3. Sign with entitlements + Hardened Runtime
 
-Alternatively, run it from **Actions ▸ Release ▸ Run workflow** and enter the tag
-(`workflow_dispatch`) — useful to re-run a release without moving the tag.
-
----
-
-## 3. What CI does automatically
-
-`release.yml` runs on a **`macos-26`** runner (pinned deliberately: the app must
-link against the macOS 26 SDK so the distributed `.app` gets Tahoe SwiftUI
-styling; `macos-latest` is still 15). In order:
-
-1. **Checkout** — `fetch-depth: 0` + `ref: <tag>` so the whole history and all tags are present (needed for the changelog range) and the build is the tagged commit.
-2. **Show toolchain** — prints `swiftc` + SDK version (diagnosing appearance drift).
-3. **Build & test** — `make test`, then `make build` (CLI) and `make gui APP_VERSION="${TAG#v}"` (`.app`). Passing `APP_VERSION` stamps the exact tag into the bundle's Info.plist (see the version note under *Preflight*). A test failure aborts the release.
-4. **Package menu-bar app** — `ditto -c -k --keepParent` zips the ad-hoc-signed app to `macthermal-app-<tag>.zip`.
-5. **Compute app-zip sha256** (`appsha`) — the cask pins the app by this hash.
-6. **Compute source-tarball sha256** (`sha`) — downloads GitHub's auto-generated `…/archive/refs/tags/<tag>.tar.gz` and hashes it; the CLI formula pins it.
-7. **Build changelog** — `git describe --tags --abbrev=0 "<tag>^"` finds the previous tag, then `git log --no-merges --pretty='- %s (%h)' <prev>..<tag>` lists every commit, plus a compare link. First release (no previous tag) → lists the entire history. This is a raw `git log` changelog *on purpose*: the repo commits straight to `main`, so GitHub's PR-based `--generate-notes` would be nearly empty.
-8. **Write release notes** — prepends the changelog, then the Homebrew install snippet + the `url`/`sha256` values for the tap.
-9. **Create GitHub Release** — `gh release create <tag> macthermal-app-<tag>.zip --title <tag> --notes-file notes.md`.
-10. **Bump tap formula & cask** — only if the `TAP_GITHUB_TOKEN` secret is set. Clones `guillerDev/homebrew-tap`, rewrites `url`/`sha256` in `Formula/macthermal.rb` and `version`/`sha256` in `Casks/macthermal.rb`, commits, pushes. If the secret is absent this step is skipped and you bump the tap by hand (see [docs/RELEASING.md](../../../docs/RELEASING.md#manual-fallback)).
-
----
-
-## 4. Verify after the run
-
-- **Actions ▸ Release** — the run is green.
-- **Releases page** — the notes lead with the **What's changed** changelog and the `macthermal-app-<tag>.zip` asset is attached.
-- **Tap repo** (`guillerDev/homebrew-tap`) — a fresh `macthermal <tag>` commit with the bumped hashes (only if `TAP_GITHUB_TOKEN` is configured).
-- **Install** picks up the new version:
-  ```sh
-  brew update
-  brew upgrade macthermal            # CLI
-  brew upgrade --cask macthermal     # menu-bar app
-  ```
-
----
-
-## 5. Fixing a bad release
-
-Tags are cheap to redo *before* anyone installs. To redo a version:
+A signed build must include the app's `.entitlements` or its sandbox / network /
+bookmark permissions are silently lost. Notarization additionally requires the
+**Hardened Runtime** (`--options runtime`).
 
 ```sh
-git push --delete origin v0.5.2      # remove the remote tag
-gh release delete v0.5.2 --yes       # remove the GitHub Release
-git tag -d v0.5.2                     # remove the local tag
-# fix the problem, commit, then re-tag and push
+codesign --force --options runtime \
+  --entitlements App.entitlements \
+  --sign "Developer ID Application: <Name> (<TEAMID>)" App.app
 ```
 
-Prefer a new patch version over re-pushing a tag once a release is public — a
-moved tag changes the source tarball, which breaks the `sha256` for anyone who
-already fetched it.
+- **`get-task-allow` must be gone** for any distributed build (it allows debugger
+  attach; notarization and the App Store reject it). A real Developer-ID / App
+  Store identity clears it; ad-hoc `-` leaves it `true`.
+- Any **re-sign** later in the pipeline (e.g. after bundling) must **re-pass
+  `--entitlements --options runtime`** — a bare `codesign -s -` drops them.
+- Sign **inside-out**: nested helpers/frameworks first, the `.app` last.
 
----
+Verify before shipping:
 
-## Gotchas
+```sh
+codesign -d --entitlements :- App.app     # expect your entitlements, NO get-task-allow
+codesign --verify --deep --strict App.app
+spctl -a -vvv --type execute App.app      # Gatekeeper assessment
+```
 
-- **Info.plist version is stamped at build time, not committed** — `make gui` writes `APP_VERSION` (default `git describe`, CI passes the exact tag) into the bundle's Info.plist, leaving the committed source file a static placeholder. Don't hand-bump it. A local `make gui` reports a `git describe` version (e.g. `0.5.1-3-gabc123-dirty`); pass `make gui APP_VERSION=x.y.z` to force one.
-- **Changelog uses commit subjects** — history already follows Conventional Commits (`feat(...)`, `fix(...)`), so it reads cleanly. Sloppy commit messages → a sloppy changelog.
-- **`macos-26` is a preview image** — if a run fails on the runner itself (not the build), pin to `macos-15` per the comment in the workflow, accepting the older SwiftUI styling.
-- **Tap bump needs its own token** — the default `GITHUB_TOKEN` can't push to the separate `homebrew-tap` repo; `TAP_GITHUB_TOKEN` (fine-grained, Contents:write on `homebrew-tap`) is required. Setup in [docs/RELEASING.md](../../../docs/RELEASING.md#automatic-formula-bump-one-time-setup).
-- **`SHA256 mismatch` on install** — the formula hash doesn't match the tarball; re-run the release or recompute (`curl -sL <url> | shasum -a 256`).
-- **Never name anything `thermal`** — the product/formula/binary is `macthermal`; `thermal` shadows a system binary and Homebrew rejects it (see [AGENTS.md](../../../AGENTS.md)).
+## 4. Notarize + staple (Developer ID / direct / Homebrew) — optional
+
+Optional but recommended for a frictionless download. Skip this whole section if
+you're deliberately shipping an un-notarized build (see §1) — just ship the
+zip / `.app` and document the quarantine workaround. When you *do* notarize:
+
+```sh
+ditto -c -k --keepParent App.app App.zip
+xcrun notarytool submit App.zip --keychain-profile <profile> --wait
+xcrun stapler staple App.app              # so it validates offline
+```
+
+Store the notary credentials once with
+`xcrun notarytool store-credentials <profile>`. If notarization is rejected, run
+`xcrun notarytool log <submission-id> --keychain-profile <profile>` — usual causes
+are a missing Hardened Runtime, `get-task-allow` present, or an unsigned nested
+binary.
+
+## 5. Automate from a tag (CI)
+
+A tag-triggered pipeline keeps releases reproducible:
+
+```
+git tag vX.Y.Z && git push --tags
+  └─> release workflow (on a macOS runner):
+      1. resolve version from the tag
+      2. build the .app (version stamped in)
+      3. sign — ad-hoc, or Developer ID + entitlements + runtime
+      4. (optional) notarize → staple
+      5. zip + sha256
+      6. create the GitHub Release with the asset
+      7. (optional) update the Homebrew cask / formula
+```
+
+Keep signing secrets in CI secrets (base64 the `.p12`, import to a temp keychain);
+never commit them. Run any project generation (`xcodegen generate`) and dependency
+resolution as the first step — see the `swift-build-test` skill.
+
+## 6. Homebrew-cask distribution (optional)
+
+Publish a **cask** in a tap repo (`homebrew-<tap>`). The cask pins the download
+`url` (derived from `version`) and a `sha256`. Best practice: keep a cask
+**template in the app repo** and regenerate the tap's cask on each release
+(substituting version + sha), so:
+
+- the in-repo template is authoritative — edit the cask there, never in the tap;
+- template fixes (DSL deprecations like `depends_on macos:`) propagate next release;
+- manual edits in the tap get overwritten.
+
+Users then `brew install --cask <tap>/<app>`.
+
+## Troubleshooting
+
+- **Gatekeeper blocks the download** — the build is un-notarized. If you intend to
+  notarize, that's the fix (notarize + staple). If you're deliberately shipping
+  un-notarized, this is expected — document the one-time workaround (right-click ▸
+  **Open**, or `xattr -dr com.apple.quarantine App.app`); it's a caveat, not a bug.
+- **Sandbox permissions missing at runtime / notarization rejected** — a re-sign
+  dropped the entitlements or left `get-task-allow=true`. Re-sign with
+  `--entitlements` + a Developer-ID identity; verify with `codesign -d --entitlements :-`.
+- **Version doesn't match the tag** — the build didn't read the tag; check the
+  version-resolution env/step and that it stamps the built `Info.plist`.
+- **CI can't build** — the runner's Xcode/Swift is too old for the project's
+  tools version; pin the image / select Xcode explicitly.
+
+## Notes for the assistant
+
+- To bump the version, **create a tag — never edit a plist**. Confirm the exact
+  `vX.Y.Z`, and **do not push tags without explicit confirmation** (a tag is an
+  immutable release).
+- **Notarization is the developer's decision, not a default** — some apps are
+  notarized, others ship un-notarized (ad-hoc or Developer ID) with a documented
+  quarantine workaround. Don't add it unless the project wants it. *If* you sign /
+  notarize for distribution, the build must use `.entitlements` + Hardened Runtime
+  and must not carry `get-task-allow`.
+- Decide the channel first (it dictates sandbox + signing); don't enable the App
+  Sandbox reflexively for a Developer-ID/Homebrew app.
