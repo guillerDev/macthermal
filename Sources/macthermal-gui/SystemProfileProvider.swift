@@ -7,7 +7,6 @@ import MacThermalCore
 enum SystemProfileProvider {
     static func current() -> DiagnosticContext {
         let processInfo = ProcessInfo.processInfo
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
 
         return DiagnosticContext(
             hardwareModel: sysctlString("hw.model") ?? "Unknown Mac",
@@ -15,7 +14,7 @@ enum SystemProfileProvider {
             architecture: architecture,
             processorCount: processInfo.processorCount,
             physicalMemoryBytes: processInfo.physicalMemory,
-            appVersion: version
+            appVersion: AppInfo.version
         )
     }
 

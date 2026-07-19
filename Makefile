@@ -11,6 +11,13 @@ PREFIX    ?= /usr/local
 ARCH   := $(shell uname -m)
 DEPLOY := -target $(ARCH)-apple-macos13.0
 
+# Version stamped into the .app bundle. Pass APP_VERSION=… to override (the
+# release CI passes the exact tag); otherwise it's derived from `git describe`,
+# and falls back to a dev placeholder when git is unavailable (empty result is
+# handled in the gui recipe). The committed Resources/Info.plist stays a static
+# placeholder — only the copy inside the bundle is stamped, before codesigning.
+APP_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+
 SHARED   := $(filter-out Sources/MacThermalCore/JSONReport.swift,$(wildcard Sources/MacThermalCore/*.swift))
 REPORT   := Sources/MacThermalCore/JSONReport.swift
 CLI_SRC  := $(SHARED) $(REPORT) Sources/macthermal/main.swift
@@ -48,6 +55,10 @@ $(APP): $(GUI_SRC) Resources/Info.plist Resources/AppIcon.icns
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
 	cp Resources/Info.plist $(APP)/Contents/Info.plist
+	@V="$(APP_VERSION)"; V="$${V:-0.0.0-dev}"; \
+		/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $$V" $(APP)/Contents/Info.plist; \
+		/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $$V" $(APP)/Contents/Info.plist; \
+		echo "stamped $(APP) version $$V"
 	cp Resources/AppIcon.icns $(APP)/Contents/Resources/AppIcon.icns
 	mv $(GUI_BIN) $(APP)/Contents/MacOS/$(GUI_BIN)
 	codesign --force --sign - $(APP) >/dev/null 2>&1 || true

@@ -36,19 +36,28 @@ brew install --cask guillerDev/tap/macthermal     # menu-bar app
 
 ## How a release works
 
-Pushing a `v*` tag triggers `.github/workflows/release.yml` on a `macos-latest`
-runner. It:
+Pushing a `v*` tag triggers `.github/workflows/release.yml` on a `macos-26`
+runner (pinned so the distributed `.app` links against the macOS 26 SDK and gets
+Tahoe SwiftUI styling — `macos-latest` is still 15). It:
 
-1. **Builds & tests** — `make test`, then `make build` and `make gui`. A test
-   failure aborts the release.
+1. **Builds & tests** — `make test`, then `make build` and
+   `make gui APP_VERSION="${TAG#v}"`. `make gui` stamps `APP_VERSION` into the
+   built `.app`'s Info.plist, so the release reports the exact tag; the committed
+   `Resources/Info.plist` is a static placeholder and is never modified (locally,
+   `make gui` derives the version from `git describe` instead). A test failure
+   aborts the release.
 2. **Packages the app** — zips the ad-hoc-signed menu-bar app as
    `macthermal-app-<tag>.zip` and hashes it (the cask pins the app by this hash).
 3. **Computes the `sha256`** — GitHub auto-generates a source tarball for every
    tag; Homebrew pins it by hash. The job downloads
    `…/archive/refs/tags/<tag>.tar.gz` and hashes it.
-4. **Creates a GitHub Release** — attaches the app zip and writes notes
-   containing the `url` + both `sha256`s.
-5. **Bumps the tap formula and cask** — see [below](#automatic-formula-bump-one-time-setup).
+4. **Builds a changelog** — lists every commit since the previous tag
+   (`git log <prev>..<tag>`) plus a compare link. A raw `git log` changelog is
+   used deliberately: the repo commits straight to `main`, so GitHub's PR-based
+   auto-notes would be nearly empty. The first release lists the whole history.
+5. **Creates a GitHub Release** — attaches the app zip and writes notes that lead
+   with the changelog, followed by the `url` + both `sha256`s.
+6. **Bumps the tap formula and cask** — see [below](#automatic-formula-bump-one-time-setup).
 
 You can also run it manually from **Actions ▸ Release ▸ Run workflow** and enter
 a tag.
@@ -106,8 +115,8 @@ sha256 "…new app-zip hash…"
 
 ## Automatic formula bump (one-time setup)
 
-Step 5 of the workflow rewrites those two lines in `homebrew-tap` and pushes the
-commit, so you never edit the hash by hand. Because the default
+The final step of the workflow rewrites those two lines in `homebrew-tap` and
+pushes the commit, so you never edit the hash by hand. Because the default
 `GITHUB_TOKEN` can only write to the repo it runs in (`macthermal`), pushing to
 the *separate* `homebrew-tap` repo needs its own token. The step is gated on
 that secret — `if: env.TAP_TOKEN != ''` — so nothing breaks until you add it.

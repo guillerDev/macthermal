@@ -16,10 +16,12 @@
 	<string>MacThermal</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<!-- Placeholder only: `make gui` stamps the real version (git tag / APP_VERSION)
+	     into the built .app at build time. This committed value is never shipped. -->
 	<key>CFBundleShortVersionString</key>
-	<string>0.5.0</string>
+	<string>0.0.0-dev</string>
 	<key>CFBundleVersion</key>
-	<string>0.5.0</string>
+	<string>0.0.0-dev</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>LSUIElement</key>

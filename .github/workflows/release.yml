@@ -42,11 +42,14 @@ jobs:
           swiftc --version
           echo "macOS SDK: $(xcrun --show-sdk-version)"
 
+      # `make gui` stamps the .app's Info.plist from APP_VERSION; passing the
+      # exact release tag makes CI authoritative (locally it derives the version
+      # from `git describe` instead). The committed Info.plist is never modified.
       - name: Build & test
         run: |
           make test
           make build
-          make gui
+          make gui APP_VERSION="${TAG#v}"
 
       # The .app is ad-hoc signed and unnotarized, so Gatekeeper will quarantine
       # it on download. Ship it zipped for convenience; users clear quarantine

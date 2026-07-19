@@ -15,6 +15,17 @@ struct DashboardView: View {
             }
             .navigationTitle("MacThermal Pro")
             .navigationSplitViewColumnWidth(min: 180, ideal: 210)
+            .safeAreaInset(edge: .bottom) {
+                Text(AppInfo.displayVersion)
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 6)
+                    .help("MacThermal Pro \(AppInfo.displayVersion)")
+            }
         } detail: {
             DashboardDetailView(
                 selection: selection ?? .overview,
