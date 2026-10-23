@@ -7,32 +7,16 @@ import MacThermalCore
 @MainActor
 final class ThermalMonitor: ObservableObject {
     let liveState = ThermalLiveState()
-    let archiveState = ThermalArchiveState()
-    let recordingState = IncidentRecordingState()
-    let statusState = AppStatusState()
+    let archiveState: ThermalArchiveState
+    let statusState: AppStatusState
+    let incidentRecorder: IncidentRecorder
+    var recordingState: IncidentRecordingState { incidentRecorder.state }
 
     private(set) var launchAtLogin: Bool {
         get { statusState.launchAtLogin }
         set { statusState.launchAtLogin = newValue }
     }
     private var history: [ThermalSample] { archiveState.history }
-    private var incidents: [ThermalIncident] { archiveState.incidents }
-    private(set) var isRecordingIncident: Bool {
-        get { recordingState.isRecording }
-        set { recordingState.isRecording = newValue }
-    }
-    private(set) var incidentStartedAt: Date? {
-        get { recordingState.startedAt }
-        set { recordingState.startedAt = newValue }
-    }
-    private(set) var incidentSampleCount: Int {
-        get { recordingState.sampleCount }
-        set { recordingState.sampleCount = newValue }
-    }
-    private(set) var recordingTrigger: ThermalIncidentTrigger? {
-        get { recordingState.trigger }
-        set { recordingState.trigger = newValue }
-    }
     private(set) var notificationsAuthorized: Bool {
         get { statusState.notificationsAuthorized }
         set { statusState.notificationsAuthorized = newValue }
@@ -46,11 +30,10 @@ final class ThermalMonitor: ObservableObject {
 
     private let reader = SMCReader()
     private let processSampler = ProcessSampler()
-    private let historyStore = HistoryStore()
+    private let historyStore: HistoryStore
     private let notificationManager = LocalNotificationManager()
     private let loginItemManager = LoginItemManager()
     private var alertEvaluator = ThermalAlertEvaluator()
-    private var automaticIncidentDetector = AutomaticIncidentDetector()
     private var timer: Timer?
     private var refreshing = false
     private var lastHistoryAt: Date?
@@ -58,12 +41,7 @@ final class ThermalMonitor: ObservableObject {
     private var cachedProcesses: [ProcessUsage] = []
     private var cachedProcessSnapshotID: UUID?
     private var cachedProcessSampledAt: Date?
-    private var incidentSamples: [ThermalSample] = []
-    private var activeIncidentID: UUID?
-    private var activeIncidentName: String?
-    private var activeIncidentJournalAvailable = false
-    private var incidentRevision = 0
-    private var incidentPersistenceTask: Task<Void, Never>?
+    private var initializationTask: Task<Void, Never>?
     private var historyReloadTask: Task<Void, Never>?
     private var loadedRetentionDays: Int?
     private var cancellables: Set<AnyCancellable> = []
@@ -82,16 +60,31 @@ final class ThermalMonitor: ObservableObject {
     // forks a process, which costs far more than reading the SMC.
     private let lowPowerBackgroundRefreshInterval: TimeInterval = 30
     private let lowPowerProcessInterval: TimeInterval = 60
-    private let automaticIncidentPreRoll: TimeInterval = 2 * 60
     private let maximumInMemoryHistoryDays = 14
     private let memoryTrimInterval: TimeInterval = 60 * 60
     private var lastMemoryTrimAt: Date?
 
-    init(settings: AppSettings) {
+    init(settings: AppSettings, historyStore: HistoryStore = HistoryStore()) {
         self.settings = settings
+        self.historyStore = historyStore
+        let archive = ThermalArchiveState()
+        let status = AppStatusState()
+        archiveState = archive
+        statusState = status
+        incidentRecorder = IncidentRecorder(
+            store: historyStore,
+            archive: archive,
+            status: status,
+            settings: settings
+        )
 
-        Task(priority: .utility) { [weak self] in
+        initializationTask = Task(priority: .utility) { [weak self] in
             await self?.initialize()
+        }
+        // Set after init so the recorder can wait on the task without the two
+        // holding each other alive.
+        incidentRecorder.waitUntilArchiveIsReady = { [weak self] in
+            await self?.initializationTask?.value
         }
     }
 
@@ -135,28 +128,27 @@ final class ThermalMonitor: ObservableObject {
     }
 
     func toggleIncidentRecording() {
-        Task {
-            if isRecordingIncident {
-                await stopIncidentRecording()
-                if !refreshing { scheduleNextRefresh() }
-            } else {
-                await startIncidentRecording(trigger: .manual, at: .now)
-                beginRefresh(priority: .userInitiated)
-            }
+        Task { await toggleIncidentRecording() }
+    }
+
+    func toggleIncidentRecording() async {
+        if incidentRecorder.isRecording {
+            await incidentRecorder.stop()
+            // Recording raises the sampling rate, so stopping has to re-pick an
+            // interval; starting just refreshes now, which reschedules anyway.
+            if !refreshing { scheduleNextRefresh() }
+        } else {
+            await incidentRecorder.start(trigger: .manual, at: .now)
+            beginRefresh(priority: .userInitiated)
         }
     }
 
     func renameIncident(_ incident: ThermalIncident, to proposedName: String) {
-        let name = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty,
-              incidents.contains(where: { $0.id == incident.id }) else { return }
-        archiveState.renameIncident(id: incident.id, to: name)
-        scheduleIncidentPersistence()
+        incidentRecorder.rename(incident, to: proposedName)
     }
 
     func deleteIncident(_ incident: ThermalIncident) {
-        archiveState.removeIncident(id: incident.id)
-        scheduleIncidentPersistence()
+        incidentRecorder.delete(incident)
     }
 
     func clearHistory() {
@@ -164,6 +156,9 @@ final class ThermalMonitor: ObservableObject {
             do {
                 try await historyStore.clearHistory()
                 archiveState.clearHistory()
+                // Otherwise the next persisted sample waits out a whole interval
+                // (up to a minute) while the user stares at an empty history.
+                lastHistoryAt = nil
             } catch {
                 presentedError = UserFacingError(message: "History could not be cleared: \(error.localizedDescription)")
             }
@@ -257,10 +252,10 @@ final class ThermalMonitor: ObservableObject {
         let historyDue = lastHistoryAt.map {
             now.timeIntervalSince($0) >= settings.historyInterval
         } ?? true
-        let incidentWasActive = isRecordingIncident && (incidentStartedAt ?? .distantFuture) <= now
+        let incidentWasActive = incidentRecorder.isActive(at: now)
         // An active recording keeps the normal cadence even in Low Power Mode:
         // process attribution is the point of the recording.
-        let dueProcessInterval = isLowPowerModeEnabled && !isRecordingIncident
+        let dueProcessInterval = isLowPowerModeEnabled && !incidentRecorder.isRecording
             ? lowPowerProcessInterval
             : processInterval
         let processDue = lastProcessAt.map {
@@ -297,22 +292,17 @@ final class ThermalMonitor: ObservableObject {
         if let reason = alertEvaluator.evaluate(
             sample: sample,
             configuration: settings.alertConfiguration(notificationsAuthorized: notificationsAuthorized),
-            now: now
+            now: now,
+            maximumSampleGap: maximumSampleGap
         ) {
             await notificationManager.send(reason)
         }
 
-        let automaticTransition = automaticIncidentDetector.evaluate(
+        await incidentRecorder.evaluateAutomaticCapture(
             sample: sample,
-            automaticCaptureEnabled: settings.automaticIncidentCaptureEnabled,
-            pressureEnabled: settings.autoRecordPressureIncidents,
-            temperatureEnabled: settings.autoRecordTemperatureIncidents,
-            thresholdCelsius: settings.alertThresholdCelsius,
-            sustainedDuration: settings.sustainedAlertSeconds,
-            recoveryDuration: settings.automaticIncidentRecoverySeconds,
-            now: now
+            now: now,
+            maximumSampleGap: maximumSampleGap
         )
-        await handleAutomaticIncidentTransition(automaticTransition, now: now)
 
         if historyDue {
             archiveState.appendHistory(sample)
@@ -325,28 +315,7 @@ final class ThermalMonitor: ObservableObject {
             }
         }
 
-        // Re-read the recording state instead of a value captured before the
-        // awaits above: this method suspends, and "Stop" can land in that window.
-        // Acting on the stale flag appended a sample to the already-reset buffer
-        // and left the UI reporting a sample count for a recording that ended.
-        guard isRecordingIncident, (incidentStartedAt ?? .distantFuture) <= now else { return }
-        incidentSamples.append(sample)
-        incidentSampleCount = incidentSamples.count
-        if activeIncidentJournalAvailable {
-            do {
-                try await historyStore.appendActiveIncident(sample)
-            } catch {
-                activeIncidentJournalAvailable = false
-                presentedError = UserFacingError(message: "The active incident journal could not be saved: \(error.localizedDescription)")
-            }
-        }
-
-        if let startedAt = incidentStartedAt,
-           now.timeIntervalSince(startedAt) >= settings.maximumIncidentDuration {
-            let trigger = recordingTrigger ?? .manual
-            await stopIncidentRecording(endedAt: now)
-            await startIncidentRecording(trigger: trigger, at: now, includesPreRoll: false)
-        }
+        await incidentRecorder.record(sample, now: now)
     }
 
     private func beginRefresh(priority: TaskPriority) {
@@ -386,7 +355,7 @@ final class ThermalMonitor: ObservableObject {
 
     private var currentRefreshInterval: TimeInterval {
         let activityInterval: TimeInterval
-        if isRecordingIncident || isElevated(liveState.menuBarSeverity) || isElevated(liveState.thermal.severity) {
+        if incidentRecorder.isRecording || isElevated(liveState.menuBarSeverity) || isElevated(liveState.thermal.severity) {
             activityInterval = elevatedRefreshInterval
         } else if panelPresented || dashboardPresented {
             activityInterval = interactiveRefreshInterval
@@ -404,6 +373,13 @@ final class ThermalMonitor: ObservableObject {
     /// Read fresh on each reschedule rather than cached: the user can toggle Low
     /// Power Mode at any time, and the next timer picks the change up within one
     /// interval without needing a notification observer.
+    /// Derived from this monitor's own slowest cadence instead of the core's
+    /// default, so raising `lowPowerBackgroundRefreshInterval` cannot silently
+    /// turn ordinary idle polling into a "sampling stopped" verdict.
+    private var maximumSampleGap: TimeInterval {
+        lowPowerBackgroundRefreshInterval * 3
+    }
+
     private var isLowPowerModeEnabled: Bool {
         ProcessInfo.processInfo.isLowPowerModeEnabled
     }
@@ -415,111 +391,6 @@ final class ThermalMonitor: ObservableObject {
         }
     }
 
-    private func startIncidentRecording(
-        trigger: ThermalIncidentTrigger,
-        at date: Date,
-        includesPreRoll: Bool = true
-    ) async {
-        guard !isRecordingIncident else { return }
-        let preRoll = trigger.isAutomatic && includesPreRoll
-            ? ThermalIncidentPreRoll.samples(
-                from: history,
-                endingAt: date,
-                duration: automaticIncidentPreRoll
-            )
-            : []
-        let startedAt = preRoll.first?.timestamp ?? date
-        let id = UUID()
-        let name = incidentName(trigger: trigger, startedAt: startedAt)
-        incidentStartedAt = startedAt
-        incidentSamples = preRoll
-        incidentSampleCount = preRoll.count
-        recordingTrigger = trigger
-        activeIncidentID = id
-        activeIncidentName = name
-        isRecordingIncident = true
-        do {
-            try await historyStore.beginActiveIncident(
-                id: id,
-                name: name,
-                startedAt: startedAt,
-                trigger: trigger,
-                samples: preRoll
-            )
-            activeIncidentJournalAvailable = true
-        } catch {
-            activeIncidentJournalAvailable = false
-            presentedError = UserFacingError(message: "The incident journal could not be started: \(error.localizedDescription)")
-        }
-    }
-
-    private func stopIncidentRecording(endedAt: Date = .now) async {
-        isRecordingIncident = false
-        guard let startedAt = incidentStartedAt, !incidentSamples.isEmpty else {
-            resetActiveIncidentState()
-            await historyStore.discardActiveIncident()
-            return
-        }
-
-        let trigger = recordingTrigger ?? .manual
-        let incident = ThermalIncident(
-            id: activeIncidentID ?? UUID(),
-            name: activeIncidentName ?? incidentName(trigger: trigger, startedAt: startedAt),
-            startedAt: startedAt,
-            endedAt: endedAt,
-            samples: incidentSamples,
-            trigger: trigger
-        )
-        archiveState.insertIncident(incident)
-        pruneStoredIncidents(now: endedAt)
-        resetActiveIncidentState()
-        await persistIncidentsNow(clearActiveIncident: true)
-    }
-
-    private func handleAutomaticIncidentTransition(
-        _ transition: AutomaticIncidentTransition?,
-        now: Date
-    ) async {
-        switch transition {
-        case .start(let trigger, _, _):
-            await startIncidentRecording(trigger: trigger, at: now)
-        case .stop:
-            if recordingTrigger?.isAutomatic == true {
-                await stopIncidentRecording(endedAt: now)
-            }
-        case nil:
-            break
-        }
-    }
-
-    private func scheduleIncidentPersistence() {
-        incidentRevision += 1
-        let revision = incidentRevision
-        let value = incidents
-        incidentPersistenceTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await historyStore.saveIncidents(value, revision: revision)
-            } catch {
-                presentedError = UserFacingError(message: "Incidents could not be saved: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    private func persistIncidentsNow(clearActiveIncident: Bool) async {
-        incidentRevision += 1
-        let revision = incidentRevision
-        do {
-            try await historyStore.saveIncidents(
-                incidents,
-                revision: revision,
-                clearActiveIncident: clearActiveIncident
-            )
-        } catch {
-            presentedError = UserFacingError(message: "Incidents could not be saved: \(error.localizedDescription)")
-        }
-    }
-
     private func trimInMemoryHistoryIfNeeded(now: Date) {
         guard lastMemoryTrimAt.map({ now.timeIntervalSince($0) >= memoryTrimInterval }) ?? true else { return }
         lastMemoryTrimAt = now
@@ -528,44 +399,7 @@ final class ThermalMonitor: ObservableObject {
         archiveState.trimHistory(before: cutoff)
     }
 
-    private func pruneStoredIncidents(now: Date) {
-        let cutoff = Calendar.current.date(
-            byAdding: .day,
-            value: -settings.incidentRetentionDays,
-            to: now
-        ) ?? .distantPast
-        archiveState.pruneIncidents(
-            cutoff: cutoff,
-            maximumCount: max(1, settings.maximumStoredIncidents)
-        )
-    }
-
-    private func incidentName(trigger: ThermalIncidentTrigger, startedAt: Date) -> String {
-        let prefix: String
-        switch trigger {
-        case .automaticThermalPressure: prefix = "Automatic pressure incident"
-        case .automaticHighTemperature: prefix = "Automatic temperature incident"
-        case .manual: prefix = "Thermal incident"
-        }
-        return "\(prefix) \(startedAt.formatted(date: .abbreviated, time: .shortened))"
-    }
-
-    private func resetActiveIncidentState() {
-        incidentStartedAt = nil
-        incidentSamples.removeAll(keepingCapacity: false)
-        incidentSampleCount = 0
-        recordingTrigger = nil
-        activeIncidentID = nil
-        activeIncidentName = nil
-        activeIncidentJournalAvailable = false
-    }
-
     func prepareForTermination() async {
-        do {
-            try await historyStore.flushActiveIncident()
-        } catch {
-            NSLog("macthermal: could not flush active incident: \(error.localizedDescription)")
-        }
-        await incidentPersistenceTask?.value
+        await incidentRecorder.prepareForTermination()
     }
 }

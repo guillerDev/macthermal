@@ -12,6 +12,7 @@ public struct AutomaticIncidentDetector: Sendable {
     private var activeTrigger: ThermalIncidentTrigger?
     private var hotSince: Date?
     private var recoveryStartedAt: Date?
+    private var lastSampleAt: Date?
 
     public init() {}
 
@@ -24,8 +25,26 @@ public struct AutomaticIncidentDetector: Sendable {
         sustainedDuration: TimeInterval,
         recoveryDuration: TimeInterval,
         now: Date,
-        recoveryMarginCelsius: Double = thermalRecoveryMarginCelsius
+        recoveryMarginCelsius: Double = thermalRecoveryMarginCelsius,
+        maximumSampleGap: TimeInterval = maximumPlausibleSampleGap
     ) -> AutomaticIncidentTransition? {
+        // Sampling stopped and resumed (sleep, suspension, a stalled refresh).
+        // Nothing was recorded across the gap, so the sustained timer restarts —
+        // otherwise waking a hot Mac opens an incident immediately, with a
+        // pre-roll pulled from before it went to sleep. An incident that was
+        // already recording ends here too: its episode stopped being observed
+        // when sampling did, and a recording with an hours-long hole in it is
+        // not the evidence the user thinks they captured.
+        let sampledAfterGap = lastSampleAt.map {
+            now.timeIntervalSince($0) > max(0, maximumSampleGap)
+        } ?? false
+        lastSampleAt = now
+        if sampledAfterGap {
+            let wasRecording = activeTrigger != nil
+            reset()
+            if wasRecording { return .stop }
+        }
+
         guard automaticCaptureEnabled && (pressureEnabled || temperatureEnabled) else {
             let shouldStop = activeTrigger != nil
             reset()
@@ -33,9 +52,15 @@ public struct AutomaticIncidentDetector: Sendable {
         }
 
         let pressureIsActive = sample.thermalSeverity == .warn || sample.thermalSeverity == .critical
-        if temperatureEnabled, sample.hottestCelsius >= thresholdCelsius {
-            if hotSince == nil { hotSince = now }
-        } else {
+        let recoveryThreshold = thresholdCelsius - max(0, recoveryMarginCelsius)
+        // Keep the sustained timer through ordinary sub-threshold noise, just
+        // like notifications and the event timeline. Hysteresis also applies
+        // before recording starts, not only while keeping an incident open.
+        if !temperatureEnabled {
+            hotSince = nil
+        } else if hotSince == nil {
+            if sample.hottestCelsius >= thresholdCelsius { hotSince = now }
+        } else if sample.hottestCelsius <= recoveryThreshold {
             hotSince = nil
         }
         let temperatureIsSustained = hotSince.map {
@@ -63,7 +88,6 @@ public struct AutomaticIncidentDetector: Sendable {
 
         guard activeTrigger != nil else { return nil }
         let pressureKeepsRecording = pressureEnabled && pressureIsActive
-        let recoveryThreshold = thresholdCelsius - max(0, recoveryMarginCelsius)
         // Temperature hysteresis only holds a *temperature*-triggered incident
         // open. A pressure-triggered one recovers on pressure clearing, so a warm
         // reading below the start threshold can't stretch it indefinitely.
