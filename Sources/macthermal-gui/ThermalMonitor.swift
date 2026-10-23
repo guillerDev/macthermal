@@ -46,7 +46,7 @@ final class ThermalMonitor: ObservableObject {
 
     private let reader = SMCReader()
     private let processSampler = ProcessSampler()
-    private let historyStore = HistoryStore()
+    private let historyStore: HistoryStore
     private let notificationManager = LocalNotificationManager()
     private let loginItemManager = LoginItemManager()
     private var alertEvaluator = ThermalAlertEvaluator()
@@ -64,6 +64,7 @@ final class ThermalMonitor: ObservableObject {
     private var activeIncidentJournalAvailable = false
     private var incidentRevision = 0
     private var incidentPersistenceTask: Task<Void, Never>?
+    private var initializationTask: Task<Void, Never>?
     private var historyReloadTask: Task<Void, Never>?
     private var loadedRetentionDays: Int?
     private var cancellables: Set<AnyCancellable> = []
@@ -87,10 +88,11 @@ final class ThermalMonitor: ObservableObject {
     private let memoryTrimInterval: TimeInterval = 60 * 60
     private var lastMemoryTrimAt: Date?
 
-    init(settings: AppSettings) {
+    init(settings: AppSettings, historyStore: HistoryStore = HistoryStore()) {
         self.settings = settings
+        self.historyStore = historyStore
 
-        Task(priority: .utility) { [weak self] in
+        initializationTask = Task(priority: .utility) { [weak self] in
             await self?.initialize()
         }
     }
@@ -135,14 +137,16 @@ final class ThermalMonitor: ObservableObject {
     }
 
     func toggleIncidentRecording() {
-        Task {
-            if isRecordingIncident {
-                await stopIncidentRecording()
-                if !refreshing { scheduleNextRefresh() }
-            } else {
-                await startIncidentRecording(trigger: .manual, at: .now)
-                beginRefresh(priority: .userInitiated)
-            }
+        Task { await toggleIncidentRecording() }
+    }
+
+    func toggleIncidentRecording() async {
+        if isRecordingIncident {
+            await stopIncidentRecording()
+            if !refreshing { scheduleNextRefresh() }
+        } else {
+            await startIncidentRecording(trigger: .manual, at: .now)
+            beginRefresh(priority: .userInitiated)
         }
     }
 
@@ -164,6 +168,9 @@ final class ThermalMonitor: ObservableObject {
             do {
                 try await historyStore.clearHistory()
                 archiveState.clearHistory()
+                // Otherwise the next persisted sample waits out a whole interval
+                // (up to a minute) while the user stares at an empty history.
+                lastHistoryAt = nil
             } catch {
                 presentedError = UserFacingError(message: "History could not be cleared: \(error.localizedDescription)")
             }
@@ -297,7 +304,8 @@ final class ThermalMonitor: ObservableObject {
         if let reason = alertEvaluator.evaluate(
             sample: sample,
             configuration: settings.alertConfiguration(notificationsAuthorized: notificationsAuthorized),
-            now: now
+            now: now,
+            maximumSampleGap: maximumSampleGap
         ) {
             await notificationManager.send(reason)
         }
@@ -310,7 +318,8 @@ final class ThermalMonitor: ObservableObject {
             thresholdCelsius: settings.alertThresholdCelsius,
             sustainedDuration: settings.sustainedAlertSeconds,
             recoveryDuration: settings.automaticIncidentRecoverySeconds,
-            now: now
+            now: now,
+            maximumSampleGap: maximumSampleGap
         )
         await handleAutomaticIncidentTransition(automaticTransition, now: now)
 
@@ -404,6 +413,13 @@ final class ThermalMonitor: ObservableObject {
     /// Read fresh on each reschedule rather than cached: the user can toggle Low
     /// Power Mode at any time, and the next timer picks the change up within one
     /// interval without needing a notification observer.
+    /// Derived from this monitor's own slowest cadence instead of the core's
+    /// default, so raising `lowPowerBackgroundRefreshInterval` cannot silently
+    /// turn ordinary idle polling into a "sampling stopped" verdict.
+    private var maximumSampleGap: TimeInterval {
+        lowPowerBackgroundRefreshInterval * 3
+    }
+
     private var isLowPowerModeEnabled: Bool {
         ProcessInfo.processInfo.isLowPowerModeEnabled
     }
@@ -420,6 +436,11 @@ final class ThermalMonitor: ObservableObject {
         at date: Date,
         includesPreRoll: Bool = true
     ) async {
+        // Live readings start immediately, but a new journal must wait until
+        // recovery and installation of the previous session's incidents finish.
+        // Re-check recording state after the wait: manual and automatic starts
+        // can both be pending while initialization is suspended.
+        await initializationTask?.value
         guard !isRecordingIncident else { return }
         let preRoll = trigger.isAutomatic && includesPreRoll
             ? ThermalIncidentPreRoll.samples(
